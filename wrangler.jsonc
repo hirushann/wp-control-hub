@@ -16,9 +16,8 @@
   "triggers": { "crons": ["0 2 * * *"] },
   "vars": {
     "MAX_ADMINS": "3",
-    "OVH_S3_BUCKET": "wp-backups",
-    "OVH_S3_ENDPOINT": "https://s3.gra.io.cloud.ovh.net",
-    "OVH_S3_REGION": "gra"
+    // Drive folder id: the part after /folders/ in the folder URL
+    "GDRIVE_FOLDER_ID": "1_IOYcx4Id-tmsu08hjweRjiQYu2vktXl"
   }
-  // secrets (npx wrangler secret put ...): ADMIN_PASSWORD, OVH_S3_ACCESS_KEY, OVH_S3_SECRET_KEY
+  // secrets (dashboard → Settings → Variables and Secrets, type Secret): ADMIN_PASSWORD, GDRIVE_CLIENT_ID, GDRIVE_CLIENT_SECRET, GDRIVE_REFRESH_TOKEN
 }

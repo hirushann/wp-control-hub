@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: WP Control Hub Connector
- * Description: Links this site to WP Control Hub: malware scans, admin account checks, OVH backups, updates with automatic rollback, remote restore.
- * Version: 0.1.2
+ * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
+ * Version: 0.2.0
  * Requires PHP: 7.4
  */
 
@@ -357,7 +357,10 @@ function wpch_upload($file, $url) {
 	$err  = curl_error($ch);
 	curl_close($ch);
 	fclose($fh);
-	if ($code !== 200) throw new Exception("Upload to OVH failed (HTTP $code): " . ($err ?: substr((string) $res, 0, 300)));
+	if ($code !== 200 && $code !== 201) throw new Exception("Upload to Google Drive failed (HTTP $code): " . ($err ?: substr((string) $res, 0, 300)));
+	$id = json_decode((string) $res, true)['id'] ?? '';
+	if (!$id) throw new Exception('Upload to Google Drive returned no file id');
+	return $id;
 }
 
 function wpch_restore_zip($zipfile) {
@@ -432,8 +435,8 @@ function wpch_backup($args) {
 	$will_update = !empty($args['update']) && ($only === null ? $ids : array_intersect($ids, $only));
 	$zip = wpch_make_backup();
 	try {
-		wpch_upload($zip, $args['put_url']);
-		wpch_report('backup', true, ['key' => $args['key'], 'size' => filesize($zip), 'update' => (bool) $will_update]);
+		$file_id = wpch_upload($zip, $args['put_url']);
+		wpch_report('backup', true, ['key' => $file_id, 'name' => $args['name'] ?? '', 'size' => filesize($zip), 'update' => (bool) $will_update]);
 		if ($will_update) {
 			try {
 				wpch_report('update', true, wpch_update($zip, $only));
@@ -450,9 +453,16 @@ function wpch_backup($args) {
 function wpch_restore($args) {
 	$zip = wpch_tmp('zip');
 	try {
-		$r = wp_remote_get($args['get_url'], ['stream' => true, 'filename' => $zip, 'timeout' => 3600]);
+		// streamed from Google Drive through the hub; signed like reports (signed body = file id)
+		$c  = wpch_conn();
+		$id = (string) $args['key'];
+		$ts = (string) time();
+		$r  = wp_remote_get(rtrim($c['hub'], '/') . '/api/backup?file=' . rawurlencode($id), [
+			'stream' => true, 'filename' => $zip, 'timeout' => 3600,
+			'headers' => ['x-wpch-site' => $c['id'], 'x-wpch-ts' => $ts, 'x-wpch-sig' => wpch_sign($c['secret'], $ts, $id)],
+		]);
 		if (is_wp_error($r) || wp_remote_retrieve_response_code($r) !== 200) {
-			throw new Exception('Download from OVH failed: ' . (is_wp_error($r) ? $r->get_error_message() : wp_remote_retrieve_response_code($r)));
+			throw new Exception('Backup download failed: ' . (is_wp_error($r) ? $r->get_error_message() : 'HTTP ' . wp_remote_retrieve_response_code($r)));
 		}
 		wpch_restore_zip($zip);
 		wpch_report('restore', true, ['key' => $args['key']]);

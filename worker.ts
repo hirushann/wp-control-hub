@@ -4,8 +4,8 @@
 import { default as handler } from "./.open-next/worker.js";
 import { type Env, runDaily, SESSION_COOKIE, sessionValid } from "./lib/hub";
 
-// /api/report authenticates with per-site HMAC instead. Static files never reach the worker (assets binding).
-const PUBLIC = new Set(["/login", "/api/report", "/favicon.ico"]);
+// /api/report and /api/backup authenticate with per-site HMAC instead. Static files never reach the worker (assets binding).
+const PUBLIC = new Set(["/login", "/api/report", "/api/backup", "/favicon.ico"]);
 
 export default {
   // Gate here, not in Next proxy: Node proxy is experimental on OpenNext Cloudflare.

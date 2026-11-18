@@ -76,7 +76,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
             ) : <Badge tone="ok">No issues found</Badge>}
           </Card>
 
-          <Card title="Backups on OVH" action={<span className="text-xs text-zinc-500">{backups.length} kept</span>}>
+          <Card title="Backups on Google Drive" action={<span className="text-xs text-zinc-500">{backups.length} kept</span>}>
             <p className={`mb-3 ${muted}`}>Restoring replaces the site’s files and database. To undo a bad update, restore the backup marked “pre-update”.</p>
             {backups.length ? (
               <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">

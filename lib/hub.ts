@@ -1,7 +1,5 @@
-import { AwsClient } from "aws4fetch";
-
 // relative imports only: worker.ts (cron) bundles this file outside Next
-export type Env = CloudflareEnv & { OVH_S3_ACCESS_KEY: string; OVH_S3_SECRET_KEY: string; ADMIN_PASSWORD: string };
+export type Env = CloudflareEnv & { ADMIN_PASSWORD: string; GDRIVE_CLIENT_ID: string; GDRIVE_CLIENT_SECRET: string; GDRIVE_REFRESH_TOKEN: string };
 export type Site = { id: string; url: string; secret: string; allowed_admins: string; created_at: number };
 export type Report = { id: number; site_id: string; type: string; ok: number; data: string; created_at: number };
 
@@ -74,30 +72,58 @@ export async function sendCommand(env: Env, site: Site, cmd: string, args: Recor
   }
 }
 
-// Presigned OVH S3 URL so the plugin never holds bucket credentials
-async function presign(env: Env, key: string, method: "PUT" | "GET") {
-  const s3 = new AwsClient({
-    accessKeyId: env.OVH_S3_ACCESS_KEY,
-    secretAccessKey: env.OVH_S3_SECRET_KEY,
-    service: "s3",
-    region: env.OVH_S3_REGION,
+/* Backups live in one Google Drive folder. The hub holds the OAuth refresh token; sites only ever get a
+   one-off resumable upload URL (no auth needed to PUT to it) and download restores through /api/backup. */
+export async function driveToken(env: Env) {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    body: new URLSearchParams({
+      client_id: env.GDRIVE_CLIENT_ID ?? "", client_secret: env.GDRIVE_CLIENT_SECRET ?? "",
+      refresh_token: env.GDRIVE_REFRESH_TOKEN ?? "", grant_type: "refresh_token",
+    }),
   });
-  const url = new URL(`${env.OVH_S3_ENDPOINT}/${env.OVH_S3_BUCKET}/${key}`);
-  url.searchParams.set("X-Amz-Expires", "43200"); // 12h: wp-cron may start the job late
-  return (await s3.sign(url, { method, aws: { signQuery: true } })).url;
+  const j = (await res.json()) as { access_token?: string; error?: string; error_description?: string };
+  if (!j.access_token) throw new Error(`Google Drive login failed: ${j.error_description ?? j.error ?? res.status}`);
+  return j.access_token;
 }
 
-// update=true: plugin backs up, uploads, runs all updates, health-checks, auto-rolls back on failure
+async function driveUploadUrl(env: Env, name: string) {
+  const res = await fetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true", {
+    method: "POST",
+    headers: { authorization: `Bearer ${await driveToken(env)}`, "content-type": "application/json; charset=UTF-8", "x-upload-content-type": "application/zip" },
+    body: JSON.stringify({ name, parents: [env.GDRIVE_FOLDER_ID] }),
+  });
+  const url = res.headers.get("location");
+  if (!res.ok || !url) throw new Error(`Google Drive upload setup failed (HTTP ${res.status}): ${(await res.text()).slice(0, 200)}`);
+  return url;
+}
+
+// update=true: plugin backs up, uploads, runs updates, health-checks, auto-rolls back on failure
 // only: update ids to install (plugin file, theme slug, "core"); omitted = all pending
 export async function backup(env: Env, site: Site, update: boolean, only?: string[]) {
-  const key = `${site.id}/${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
-  await sendCommand(env, site, "backup", { key, put_url: await presign(env, key, "PUT"), update, ...(only && { only }) });
+  const name = `${host(site.url)}_${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
+  let put_url: string;
+  try {
+    put_url = await driveUploadUrl(env, name);
+  } catch (e) {
+    // no backup → no update either; say why in Activity instead of failing silently
+    return insertReport(env, site.id, "backup", false, { error: `${e instanceof Error ? e.message : e}${update ? " (updates skipped)" : ""}` });
+  }
+  await sendCommand(env, site, "backup", { name, put_url, update, ...(only && { only }) });
+}
+
+// key = Drive file id; only ids this site reported as its own backups
+export async function siteOwnsBackup(env: Env, siteId: string, key: string) {
+  return !!(await env.DB.prepare("SELECT 1 FROM reports WHERE site_id = ? AND type = 'backup' AND ok = 1 AND json_extract(data, '$.key') = ?")
+    .bind(siteId, key).first());
 }
 
 export async function restore(env: Env, site: Site, key: string) {
-  if (!key.startsWith(`${site.id}/`)) throw new Error("Backup does not belong to this site");
-  await sendCommand(env, site, "restore", { key, get_url: await presign(env, key, "GET") });
+  if (!(await siteOwnsBackup(env, site.id, key))) throw new Error("Backup does not belong to this site");
+  await sendCommand(env, site, "restore", { key });
 }
+
+const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 
 export async function runDaily(env: Env, now = Date.now()) {
   const { results: sites } = await env.DB.prepare("SELECT * FROM sites").all<Site>();
@@ -142,7 +168,7 @@ export async function siteBackups(env: Env, siteId: string) {
   )
     .bind(siteId)
     .all<Report>();
-  return results.map((r) => ({ ...r, ...(JSON.parse(r.data) as { key: string; size: number; update?: boolean }) }));
+  return results.map((r) => ({ ...r, ...(JSON.parse(r.data) as { key: string; name?: string; size: number; update?: boolean }) }));
 }
 
 type Admin = { login: string; email: string };

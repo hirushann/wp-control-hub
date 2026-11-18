@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
-import { adminIssues, createSession, passwordOk, sessionValid, sign, verify, type Report, type Site } from "./hub.ts";
+import { adminIssues, backup, createSession, type Env, passwordOk, sessionValid, sign, verify, type Report, type Site } from "./hub.ts";
 
 test("signature matches the plugin's PHP wpch_sign()", async () => {
   const ts = String(Math.floor(Date.now() / 1000));
@@ -32,4 +32,30 @@ test("login session", async () => {
   assert.ok(!(await sessionValid(env, await createSession(env, Date.now() - 8 * 86_400_000))), "expired");
   assert.ok(!(await sessionValid(env, token.replace(/.$/, "x"))), "tampered");
   assert.ok(!(await sessionValid(env, null)));
+});
+
+test("backup without Google Drive access records a failure and sends nothing to the site", async () => {
+  const inserted: unknown[][] = [];
+  const env = {
+    GDRIVE_FOLDER_ID: "f",
+    DB: { prepare: () => ({ bind: (...a: unknown[]) => ({ run: async () => inserted.push(a) }) }) },
+  } as unknown as Env;
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify({ error: "invalid_grant", error_description: "Token has been expired or revoked." }), { status: 400 });
+  }) as typeof fetch;
+  try {
+    await backup(env, { id: "s1", url: "https://a.com", secret: "x", allowed_admins: "", created_at: 0 }, true);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.deepEqual(calls, ["https://oauth2.googleapis.com/token"]); // never contacted the site
+  assert.equal(inserted.length, 1);
+  const [siteId, type, ok, data] = inserted[0];
+  assert.equal(siteId, "s1");
+  assert.equal(type, "backup");
+  assert.equal(ok, 0);
+  assert.match(String(data), /Token has been expired or revoked\. \(updates skipped\)/);
 });
