@@ -6,9 +6,17 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
+    "db:init": "wrangler d1 execute wp-control-hub --remote --file=schema.sql",
+    "db:init:local": "wrangler d1 execute wp-control-hub --local --file=schema.sql",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "test": "node --test lib/hub.test.ts"
   },
   "dependencies": {
+    "@opennextjs/cloudflare": "^1.20.17",
+    "aws4fetch": "^1.0.20",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"
@@ -21,6 +29,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "tailwindcss": "4.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.164.0"
   }
 }

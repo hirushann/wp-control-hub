@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // worker.ts wraps the OpenNext build output and adds the cron handler
+  "main": "worker.ts",
+  "name": "wp-control-hub",
+  "account_id": "7f788861085c393b77455eb24be40f00",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "wp-control-hub" }],
+  "d1_databases": [
+    // create with: npx wrangler d1 create wp-control-hub  — then paste the id here
+    { "binding": "DB", "database_name": "wp-control-hub", "database_id": "a402e357-f0d1-45f2-94e8-b2d98b00e4aa" }
+  ],
+  // daily at 02:00 UTC: status + backup/update every day, malware scan every 2nd day
+  "triggers": { "crons": ["0 2 * * *"] },
+  "vars": {
+    "MAX_ADMINS": "3",
+    "OVH_S3_BUCKET": "wp-backups",
+    "OVH_S3_ENDPOINT": "https://s3.gra.io.cloud.ovh.net",
+    "OVH_S3_REGION": "gra"
+  }
+  // secrets (npx wrangler secret put ...): ADMIN_PASSWORD, OVH_S3_ACCESS_KEY, OVH_S3_SECRET_KEY
+}

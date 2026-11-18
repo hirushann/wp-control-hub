@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# cloudflare
+.open-next
+.wrangler
+.dev.vars
+
+# built plugin zip (rebuild: cd wp-plugin && zip -r wp-control-hub.zip wp-control-hub)
+/wp-plugin/*.zip
