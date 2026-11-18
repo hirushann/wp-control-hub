@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { restoreBackup, runCommand, saveAllowedAdmins } from "@/app/actions";
 import { SubmitButton } from "@/app/buttons";
 import { ago, Badge, Card, host, inputClass, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, connectionKey, type Env, getSite, siteBackups, siteReports } from "@/lib/hub";
+import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, siteBackups, siteReports } from "@/lib/hub";
 
 export default function SitePage({ params }: PageProps<"/sites/[id]">) {
   return (
@@ -19,6 +19,8 @@ export default function SitePage({ params }: PageProps<"/sites/[id]">) {
 }
 
 const muted = "text-sm text-zinc-500";
+const bytes = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+const scopeLabel: Record<string, string> = { db: "database only", files: "files only" };
 const fmtDate = (t: number) => new Date(t).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC";
 
 async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -31,10 +33,12 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
   const last = (t: string) => reports.find((r) => r.type === t && r.ok);
   const status = last("status"), scan = last("scan");
   const statusData = status ? JSON.parse(status.data) : null;
+  const info = statusData?.info;
   const findings: { file: string; reason: string }[] = scan ? JSON.parse(scan.data).findings : [];
   const issues = adminIssues(site, status, Number(env.MAX_ADMINS));
   const updates: { id?: string; type: string; name: string; from: string; to: string }[] = statusData?.updates ?? [];
   // a backup was sent and the site hasn't reported back yet (backups of big sites take several minutes)
+  // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const running = reports[0]?.type === "queued" && Date.now() - reports[0].created_at < 30 * 60_000;
 
   return (
@@ -57,7 +61,16 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
           <input type="hidden" name="id" value={site.id} />
           <SubmitButton name="cmd" value="status">Check users &amp; updates</SubmitButton>
           <SubmitButton name="cmd" value="scan">Scan for malware</SubmitButton>
-          <SubmitButton name="cmd" value="backup">Back up now</SubmitButton>
+          <span className="flex gap-1">
+            <label htmlFor="scope" className="sr-only">What to back up</label>
+            <select id="scope" name="scope" defaultValue="both"
+              className="rounded-lg border border-zinc-300 bg-white px-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
+              <option value="both">Database + files</option>
+              <option value="db">Database only</option>
+              <option value="files">Files only</option>
+            </select>
+            <SubmitButton name="cmd" value="backup">Back up now</SubmitButton>
+          </span>
           <SubmitButton name="cmd" value="update" variant="primary" confirm="Back up, then install all updates? It rolls back automatically if the site breaks.">
             Back up &amp; update
           </SubmitButton>
@@ -95,11 +108,12 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                       <span className="font-medium">{fmtDate(b.created_at)}</span>
                       <span className="tabular-nums text-zinc-500">{(b.size / 1e6).toFixed(1)} MB</span>
                       {b.update && <Badge tone="muted">pre-update</Badge>}
+                      {b.scope && scopeLabel[b.scope] && <Badge tone="muted">{scopeLabel[b.scope]}</Badge>}
                     </div>
                     <form action={restoreBackup}>
                       <input type="hidden" name="id" value={site.id} />
                       <input type="hidden" name="key" value={b.key} />
-                      <SubmitButton variant="danger" confirm={`Restore ${host(site.url)} to ${fmtDate(b.created_at)}? This overwrites the live site.`}>Restore</SubmitButton>
+                      <SubmitButton variant="danger" confirm={`Restore ${b.scope === "db" ? "the database of " : b.scope === "files" ? "the files of " : ""}${host(site.url)} to ${fmtDate(b.created_at)}? This overwrites the live site.`}>Restore</SubmitButton>
                     </form>
                   </li>
                 ))}
@@ -117,7 +131,8 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                     : r.type === "queued" ? `${d.job} started`
                     : r.type === "update" ? (rolledBack ? `Rolled back: ${d.reason}` : `${d.updated.length} updated${d.failed?.length ? `, ${d.failed.length} failed` : ""}`)
                     : r.type === "scan" ? `${d.findings.length} findings`
-                    : r.type === "backup" ? `${(d.size / 1e6).toFixed(1)} MB uploaded` : "";
+                    : r.type === "backup" ? `${(d.size / 1e6).toFixed(1)} MB uploaded${scopeLabel[d.scope] ? ` (${scopeLabel[d.scope]})` : ""}`
+                    : r.type === "connector" ? `Connector updated to ${d.version}` : "";
                   return (
                     <li key={r.id} className="flex gap-3 text-sm">
                       <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${!r.ok ? "bg-red-500" : rolledBack ? "bg-amber-500" : r.type === "queued" ? "bg-blue-500" : "bg-emerald-500"}`} />
@@ -134,6 +149,33 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
 
         <div className="space-y-6">
+          <Card title="Site overview">
+            {!info ? <p className={muted}>{statusData ? "Install connector 0.3.0 and run “Check users & updates” to see details." : "Unknown until the first check."}</p> : (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+                {([
+                  ["Site name", info.name],
+                  ["WordPress", statusData.wp],
+                  ["PHP", `${statusData.php} · ${info.memory_limit} memory`],
+                  ["Theme", info.theme],
+                  ["Plugins", `${info.plugins_active} active of ${info.plugins_total}`],
+                  ["Users", info.users],
+                  ["Database", bytes(info.db_size)],
+                  ["Disk free", info.disk_free == null ? "unknown" : bytes(info.disk_free)],
+                  ["Last backup", backups[0] ? ago(backups[0].created_at) : <Badge tone="warn">never</Badge>],
+                  ["HTTPS", info.https ? "Yes" : <Badge tone="bad">No</Badge>],
+                  ["Search engines", info.indexing ? "Allowed" : <Badge tone="warn">Discouraged</Badge>],
+                  ["Debug mode", info.debug ? <Badge tone="warn">On</Badge> : "Off"],
+                  ["Server", info.server || "unknown"],
+                ] as [string, React.ReactNode][]).map(([k, v]) => (
+                  <div key={k} className="contents">
+                    <dt className="text-zinc-500">{k}</dt>
+                    <dd className="min-w-0 truncate text-right font-medium">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </Card>
+
           <Card title="Admin accounts" action={status && <span className="text-xs text-zinc-500">{ago(status.created_at)}</span>}>
             {issues.length > 0 && (
               <ul className="mb-3 space-y-1 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-300">
@@ -190,6 +232,21 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
           </Card>
 
           <Card title="Plugin connection">
+            <div className="mb-3 flex items-center justify-between gap-2 text-sm">
+              <span>Connector {statusData?.connector ?? (statusData ? "older than 0.3.0" : "unknown")}</span>
+              {statusData?.connector && statusData.connector !== PLUGIN_VERSION && (
+                <form action={runCommand}>
+                  <input type="hidden" name="id" value={site.id} />
+                  <SubmitButton name="cmd" value="connector" variant="primary">Update to {PLUGIN_VERSION}</SubmitButton>
+                </form>
+              )}
+              {statusData?.connector === PLUGIN_VERSION && <Badge tone="ok">Latest</Badge>}
+            </div>
+            {statusData && !statusData.connector && (
+              <p className={`mb-3 ${muted}`}>
+                This version can’t update itself. Install it once by hand: <a href="/wp-control-hub.zip" className="font-medium underline">download {PLUGIN_VERSION}</a>, then Plugins → Add New → Upload → Replace current.
+              </p>
+            )}
             <details>
               <summary className="cursor-pointer text-sm font-medium">Show connection key</summary>
               <p className={`mt-2 ${muted}`}>Paste into WordPress → Settings → Control Hub. Treat it like a password.</p>

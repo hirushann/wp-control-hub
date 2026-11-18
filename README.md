@@ -8,6 +8,7 @@ Next.js dashboard on Cloudflare Workers (OpenNext + D1 + Cron) that manages many
 | Malware scan every 2 days | Plugin checks core files against wordpress.org checksums, PHP in uploads, unknown files in core dirs, and known malicious code patterns |
 | Daily admin account check | Plugin lists administrators; hub flags more than `MAX_ADMINS` or anyone not in the site's allowed list |
 | Daily backup to Google Drive | Plugin zips files + DB dump and uploads it to a Drive folder via a one-off upload URL from the hub (sites never hold Google credentials) |
+| Manual backups | Database + files, database only, or files only (updates always take a full backup) |
 | Daily updates with rollback | After the backup, plugin updates core/plugins/themes, loads the home page and login page, and restores the backup automatically if either fails |
 | Manual rollback / remote restore | Site page → Backups → Restore (backups taken before updates are marked "pre-update") |
 
@@ -30,7 +31,7 @@ Both directions use HMAC-SHA256 with a per-site secret and a 5-minute timestamp 
 ## Adding a site
 
 1. Dashboard → enter the site's https URL → Add site
-2. Install `wp-plugin/wp-control-hub` on the site (zip the folder, upload via Plugins → Add New)
+2. Install the connector: download `https://<your hub>/wp-control-hub.zip` and upload it via Plugins → Add New. From 0.3.0 on it updates itself from the hub (site page → Plugin connection, or “Update N sites” on the dashboard). To ship a plugin change, bump `Version:` in the plugin header and `PLUGIN_VERSION` in `lib/hub.ts` (a test checks they match), then `npm run deploy`.
 3. WordPress → Settings → Control Hub → paste the connection key from the hub's site page
 4. Hub site page → set allowed admin usernames → "Check users & updates" to test the link
 

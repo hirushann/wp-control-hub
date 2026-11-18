@@ -2,10 +2,10 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { addSite } from "./actions";
+import { addSite, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
 import { Card, host, inputClass, Shell, Skeleton, Stat, Status } from "./ui";
-import { adminIssues, type Env, getSites, latestReports } from "@/lib/hub";
+import { adminIssues, connectorVersion, type Env, getSites, latestReports, PLUGIN_VERSION } from "@/lib/hub";
 
 export default function Home() {
   return (
@@ -58,14 +58,31 @@ async function Sites() {
       issues: adminIssues(s, status, max),
       pending: status?.ok ? JSON.parse(status.data).updates.length : 0,
       rolledBack: update?.ok ? JSON.parse(update.data).rolled_back : false,
-      failed: [status, scan, update, backup, r("restore")].some((x) => x && !x.ok),
+      failed: [status, scan, update, backup, r("restore"), r("connector")].some((x) => x && !x.ok),
+      connector: connectorVersion(status),
     };
   });
   const count = (f: (x: (typeof rows)[number]) => boolean) => rows.filter(f).length;
+  const outdated = count((x) => !!x.connector && x.connector !== PLUGIN_VERSION);
+  const manual = count((x) => !!x.status?.ok && !x.connector);
   const malware = count((x) => x.findings > 0), admins = count((x) => x.issues.length > 0), failed = count((x) => x.failed);
 
   return (
     <div className="space-y-6">
+      {(outdated > 0 || manual > 0) && (
+        <div className="flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 sm:flex-row sm:items-center sm:justify-between dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200">
+          <p>
+            Connector {PLUGIN_VERSION} is available.
+            {outdated > 0 && ` ${outdated} site${outdated > 1 ? "s" : ""} can update from here.`}
+            {manual > 0 && <> {manual} site{manual > 1 ? "s run" : " runs"} a version older than 0.3.0: install <a href="/wp-control-hub.zip" className="font-medium underline">the zip</a> by hand once.</>}
+          </p>
+          {outdated > 0 && (
+            <form action={updateAllConnectors}>
+              <SubmitButton variant="primary">Update {outdated} site{outdated > 1 ? "s" : ""}</SubmitButton>
+            </form>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat label="Sites" value={sites.length} />
         <Stat label="Malware alerts" value={malware} tone={malware ? "bad" : undefined} />

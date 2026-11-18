@@ -3,7 +3,10 @@ export type Env = CloudflareEnv & { ADMIN_PASSWORD: string; GDRIVE_CLIENT_ID: st
 export type Site = { id: string; url: string; secret: string; allowed_admins: string; created_at: number };
 export type Report = { id: number; site_id: string; type: string; ok: number; data: string; created_at: number };
 
-export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore"];
+export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector"];
+// connector plugin version this hub serves at /wp-control-hub.zip; must match the plugin header (checked in hub.test.ts)
+export const PLUGIN_VERSION = "0.3.0";
+export type BackupScope = "both" | "db" | "files";
 const enc = new TextEncoder();
 
 // HMAC-SHA256 hex of "<ts>.<body>" — must match wpch_sign() in the plugin
@@ -102,8 +105,10 @@ async function driveUploadUrl(env: Env, name: string) {
 
 // update=true: plugin backs up, uploads, runs updates, health-checks, auto-rolls back on failure
 // only: update ids to install (plugin file, theme slug, "core"); omitted = all pending
-export async function backup(env: Env, site: Site, update: boolean, only?: string[]) {
-  const name = `${host(site.url)}_${new Date().toISOString().replace(/[:.]/g, "-")}.zip`;
+// scope: what to back up; updates always take a full backup so they can roll back
+export async function backup(env: Env, site: Site, update: boolean, only?: string[], scope: BackupScope = "both") {
+  if (update) scope = "both";
+  const name = `${host(site.url)}_${new Date().toISOString().replace(/[:.]/g, "-")}${scope === "both" ? "" : `_${scope}`}.zip`;
   let put_url: string;
   try {
     put_url = await driveUploadUrl(env, name);
@@ -112,9 +117,17 @@ export async function backup(env: Env, site: Site, update: boolean, only?: strin
     return insertReport(env, site.id, "backup", false, { error: `${e instanceof Error ? e.message : e}${update ? " (updates skipped)" : ""}` });
   }
   // long job: log that it started so the dashboard shows something until the site reports back
-  if (await sendCommand(env, site, "backup", { name, put_url, update, ...(only && { only }) }))
-    await insertReport(env, site.id, "queued", true, { job: update ? "Backup & update" : "Backup" });
+  if (await sendCommand(env, site, "backup", { name, put_url, update, scope, ...(only && { only }) }))
+    await insertReport(env, site.id, "queued", true, { job: update ? "Backup & update" : scope === "db" ? "Database backup" : scope === "files" ? "Files backup" : "Backup" });
 }
+
+// site downloads the hub's own /wp-control-hub.zip and installs it over itself
+export async function updateConnector(env: Env, site: Site) {
+  if (await sendCommand(env, site, "connector")) await insertReport(env, site.id, "queued", true, { job: "Connector update" });
+}
+
+// version the site last reported; undefined = plugin older than 0.3.0 (can't self-update, needs one manual install)
+export const connectorVersion = (status?: Report) => (status?.ok ? (JSON.parse(status.data).connector as string | undefined) : undefined);
 
 // key = Drive file id; only ids this site reported as its own backups
 export async function siteOwnsBackup(env: Env, siteId: string, key: string) {
@@ -172,7 +185,7 @@ export async function siteBackups(env: Env, siteId: string) {
   )
     .bind(siteId)
     .all<Report>();
-  return results.map((r) => ({ ...r, ...(JSON.parse(r.data) as { key: string; name?: string; size: number; update?: boolean }) }));
+  return results.map((r) => ({ ...r, ...(JSON.parse(r.data) as { key: string; name?: string; size: number; update?: boolean; scope?: BackupScope }) }));
 }
 
 type Admin = { login: string; email: string };

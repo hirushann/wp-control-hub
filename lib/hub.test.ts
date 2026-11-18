@@ -1,8 +1,9 @@
 // node --test lib/hub.test.ts
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { adminIssues, backup, createSession, type Env, passwordOk, sessionValid, sign, verify, type Report, type Site } from "./hub.ts";
+import { adminIssues, backup, PLUGIN_VERSION, createSession, type Env, passwordOk, sessionValid, sign, verify, type Report, type Site } from "./hub.ts";
 
 test("signature matches the plugin's PHP wpch_sign()", async () => {
   const ts = String(Math.floor(Date.now() / 1000));
@@ -58,4 +59,9 @@ test("backup without Google Drive access records a failure and sends nothing to 
   assert.equal(type, "backup");
   assert.equal(ok, 0);
   assert.match(String(data), /Token has been expired or revoked\. \(updates skipped\)/);
+});
+
+test("PLUGIN_VERSION matches the plugin header (bump both together)", () => {
+  const php = readFileSync(new URL("../wp-plugin/wp-control-hub/wp-control-hub.php", import.meta.url), "utf8");
+  assert.equal(php.match(/^ \* Version: (.+)$/m)?.[1].trim(), PLUGIN_VERSION);
 });

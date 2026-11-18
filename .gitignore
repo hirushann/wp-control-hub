@@ -45,5 +45,6 @@ next-env.d.ts
 .wrangler
 .dev.vars
 
-# built plugin zip (rebuild: cd wp-plugin && zip -r wp-control-hub.zip wp-control-hub)
+# built plugin zip, served by the hub at /wp-control-hub.zip (rebuild: npm run plugin:zip; deploy does it)
 /wp-plugin/*.zip
+/public/wp-control-hub.zip

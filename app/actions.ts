@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, createSession, type Env, getSite, passwordOk, restore, SESSION_COOKIE, SESSION_TTL, sendCommand } from "@/lib/hub";
+import { backup, type BackupScope, connectorVersion, createSession, type Env, getSite, getSites, latestReports, passwordOk, PLUGIN_VERSION, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, updateConnector } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -44,7 +44,9 @@ export async function runCommand(form: FormData) {
   // "pick" = submitted from the Pending updates checklist: install only the ticked items
   const only = form.has("pick") ? form.getAll("only").map(String) : undefined;
   if (only && !only.length) return;
-  if (cmd === "backup" || cmd === "update") await backup(env(), site, cmd === "update", only);
+  const scope = String(form.get("scope") ?? "both");
+  if (cmd === "backup" || cmd === "update") await backup(env(), site, cmd === "update", only, (["db", "files"].includes(scope) ? scope : "both") as BackupScope);
+  else if (cmd === "connector") await updateConnector(env(), site);
   else if (cmd === "status" || cmd === "scan") await sendCommand(env(), site, cmd);
   refresh();
 }
@@ -59,5 +61,15 @@ export async function saveAllowedAdmins(form: FormData) {
   await env().DB.prepare("UPDATE sites SET allowed_admins = ? WHERE id = ?")
     .bind(String(form.get("allowed_admins") ?? "").trim(), site.id)
     .run();
+  refresh();
+}
+
+// sites on 0.3.0+ that report an older connector; older plugins can't self-update
+export async function updateAllConnectors() {
+  const [sites, latest] = await Promise.all([getSites(env()), latestReports(env())]);
+  await Promise.allSettled(sites.filter((s) => {
+    const v = connectorVersion(latest.get(`${s.id}:status`));
+    return v && v !== PLUGIN_VERSION;
+  }).map((s) => updateConnector(env(), s)));
   refresh();
 }

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.2.1
+ * Version: 0.3.0
  * Requires PHP: 7.4
  */
 
@@ -145,7 +145,7 @@ function wpch_verify_request(WP_REST_Request $r) {
 function wpch_command(WP_REST_Request $r) {
 	$p   = json_decode($r->get_body(), true);
 	$cmd = $p['cmd'] ?? '';
-	if (!in_array($cmd, ['status', 'scan', 'backup', 'restore'], true)) {
+	if (!in_array($cmd, ['status', 'scan', 'backup', 'restore', 'connector'], true)) {
 		return new WP_Error('wpch_cmd', 'Unknown command', ['status' => 400]);
 	}
 	// uniqid: WP drops identical single events queued within 10 minutes
@@ -190,6 +190,7 @@ function wpch_run_job($cmd, $args) {
 			case 'scan':    wpch_report('scan', true, wpch_scan()); break;
 			case 'backup':  wpch_backup($args); break;
 			case 'restore': wpch_restore($args); break;
+			case 'connector': wpch_self_update(); break;
 		}
 	} catch (Throwable $e) {
 		wpch_report($cmd, false, ['error' => $e->getMessage()]);
@@ -230,7 +231,27 @@ function wpch_status() {
 		return ['login' => $u->user_login, 'email' => $u->user_email];
 	}, get_users(['role' => 'administrator']));
 
-	return ['wp' => get_bloginfo('version'), 'php' => PHP_VERSION, 'admins' => $admins, 'updates' => $updates, 'login_url' => wp_login_url()];
+	global $wpdb;
+	$theme = wp_get_theme();
+	$disk  = function_exists('disk_free_space') ? @disk_free_space(ABSPATH) : false;
+	$info  = [
+		'name'           => get_bloginfo('name'),
+		'theme'          => trim($theme->get('Name') . ' ' . $theme->get('Version')),
+		'plugins_active' => count((array) get_option('active_plugins', [])),
+		'plugins_total'  => count(get_plugins()),
+		'users'          => (int) count_users()['total_users'],
+		'db_size'        => (int) $wpdb->get_var($wpdb->prepare('SELECT SUM(data_length + index_length) FROM information_schema.TABLES WHERE table_schema = %s', DB_NAME)),
+		'disk_free'      => $disk === false ? null : (int) $disk,
+		'https'          => strpos(home_url(), 'https://') === 0,
+		'indexing'       => (bool) get_option('blog_public'),
+		'debug'          => defined('WP_DEBUG') && WP_DEBUG,
+		'memory_limit'   => ini_get('memory_limit'),
+		'server'         => $_SERVER['SERVER_SOFTWARE'] ?? '',
+	];
+	// read from disk, not a constant: right after a self-update the old code is still in memory
+	$connector = get_file_data(__FILE__, ['v' => 'Version'])['v'];
+
+	return ['wp' => get_bloginfo('version'), 'php' => PHP_VERSION, 'connector' => $connector, 'info' => $info, 'admins' => $admins, 'updates' => $updates, 'login_url' => wp_login_url()];
 }
 
 /* ---------- Malware scan ---------- */
@@ -340,19 +361,25 @@ function wpch_import_db($file) {
 }
 
 // shortcut: assumes wp-content lives inside ABSPATH and the site fits in one S3 PUT (5 GB); use multipart upload beyond that
-function wpch_make_backup() {
-	$sql = wpch_tmp('sql');
+// $scope: 'both' | 'db' | 'files'
+function wpch_make_backup($scope = 'both') {
 	$zipfile = wpch_tmp('zip');
-	wpch_dump_db($sql);
 	$zip = new ZipArchive();
 	if ($zip->open($zipfile, ZipArchive::CREATE) !== true) throw new Exception('Cannot create zip');
-	$zip->addFile($sql, 'wpch-db.sql');
-	foreach (wpch_files(ABSPATH) as $path) {
-		if (preg_match(WPCH_SKIP, $path)) continue;
-		$zip->addFile($path, substr($path, strlen(ABSPATH)));
+	$sql = null;
+	if ($scope !== 'files') {
+		$sql = wpch_tmp('sql');
+		wpch_dump_db($sql);
+		$zip->addFile($sql, 'wpch-db.sql');
+	}
+	if ($scope !== 'db') {
+		foreach (wpch_files(ABSPATH) as $path) {
+			if (preg_match(WPCH_SKIP, $path)) continue;
+			$zip->addFile($path, substr($path, strlen(ABSPATH)));
+		}
 	}
 	$ok = $zip->close();
-	unlink($sql);
+	if ($sql) unlink($sql);
 	if (!$ok) throw new Exception('Writing backup zip failed');
 	return $zipfile;
 }
@@ -378,15 +405,11 @@ function wpch_upload($file, $url) {
 	return $id;
 }
 
-function wpch_restore_zip($zipfile) {
-	$zip = new ZipArchive();
-	if ($zip->open($zipfile) !== true) throw new Exception('Cannot open backup zip');
-
-	// Database first, with a safety dump so a failed import doesn't leave a half-restored DB
+function wpch_restore_db($zipfile) {
 	$sql    = wpch_tmp('sql');
 	$safety = wpch_tmp('sql');
 	try {
-		if (!copy("zip://$zipfile#wpch-db.sql", $sql)) throw new Exception('Backup has no database dump');
+		if (!copy("zip://$zipfile#wpch-db.sql", $sql)) throw new Exception('Cannot read database dump from backup');
 		wpch_dump_db($safety);
 		try {
 			wpch_import_db($sql);
@@ -398,6 +421,14 @@ function wpch_restore_zip($zipfile) {
 		@unlink($sql);
 		@unlink($safety);
 	}
+}
+
+function wpch_restore_zip($zipfile) {
+	$zip = new ZipArchive();
+	if ($zip->open($zipfile) !== true) throw new Exception('Cannot open backup zip');
+
+	// Database first (files-only backups have none), with a safety dump so a failed import doesn't leave a half-restored DB
+	if ($zip->locateName('wpch-db.sql') !== false) wpch_restore_db($zipfile);
 
 	$names = [];
 	for ($i = 0; $i < $zip->numFiles; $i++) {
@@ -405,7 +436,7 @@ function wpch_restore_zip($zipfile) {
 		if ($n !== 'wpch-db.sql' && strpos($n, '..') === false) $names[] = $n;
 	}
 	// shortcut: overwrites files but doesn't delete ones added after the backup (e.g. new plugin files)
-	if (!$zip->extractTo(ABSPATH, $names)) throw new Exception('Extracting files failed');
+	if ($names && !$zip->extractTo(ABSPATH, $names)) throw new Exception('Extracting files failed'); // db-only backup: nothing to extract
 	$zip->close();
 	if (function_exists('opcache_reset')) opcache_reset();
 }
@@ -448,10 +479,12 @@ function wpch_backup($args) {
 	$only = isset($args['only']) ? array_map('strval', (array) $args['only']) : null;
 	$ids  = array_column(wpch_status()['updates'], 'id');
 	$will_update = !empty($args['update']) && ($only === null ? $ids : array_intersect($ids, $only));
-	$zip = wpch_make_backup();
+	// rollback after an update needs both database and files
+	$scope = $will_update ? 'both' : (in_array($args['scope'] ?? '', ['db', 'files'], true) ? $args['scope'] : 'both');
+	$zip = wpch_make_backup($scope);
 	try {
 		$file_id = wpch_upload($zip, $args['put_url']);
-		wpch_report('backup', true, ['key' => $file_id, 'name' => $args['name'] ?? '', 'size' => filesize($zip), 'update' => (bool) $will_update]);
+		wpch_report('backup', true, ['key' => $file_id, 'name' => $args['name'] ?? '', 'size' => filesize($zip), 'update' => (bool) $will_update, 'scope' => $scope]);
 		if ($will_update) {
 			try {
 				wpch_report('update', true, wpch_update($zip, $only));
@@ -484,4 +517,22 @@ function wpch_restore($args) {
 	} finally {
 		@unlink($zip);
 	}
+}
+
+/* ---------- Self-update: install the connector zip the hub serves ---------- */
+
+function wpch_self_update() {
+	wpch_admin_includes();
+	// the zip unpacks to wp-control-hub/; any other folder name would install a second copy
+	if (dirname(plugin_basename(__FILE__)) !== 'wp-control-hub') {
+		throw new Exception('Plugin folder is "' . dirname(plugin_basename(__FILE__)) . '", not "wp-control-hub": reinstall it once from the hub zip.');
+	}
+	$up = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
+	$r  = $up->install(rtrim(wpch_conn()['hub'], '/') . '/wp-control-hub.zip', ['overwrite_package' => true]);
+	if (!$r || is_wp_error($r)) {
+		throw new Exception('Connector update failed: ' . (is_wp_error($r) ? $r->get_error_message() : implode(' ', (array) $up->skin->get_upgrade_messages())));
+	}
+	if (function_exists('opcache_reset')) opcache_reset();
+	wpch_report('connector', true, ['version' => get_file_data(__FILE__, ['v' => 'Version'])['v']]);
+	wpch_report('status', true, wpch_status());
 }
