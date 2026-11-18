@@ -67,8 +67,10 @@ export async function sendCommand(env: Env, site: Site, cmd: string, args: Recor
       body,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200)}`);
+    return true;
   } catch (e) {
     await insertReport(env, site.id, cmd, false, { error: `Site unreachable: ${e}` });
+    return false;
   }
 }
 
@@ -109,7 +111,9 @@ export async function backup(env: Env, site: Site, update: boolean, only?: strin
     // no backup → no update either; say why in Activity instead of failing silently
     return insertReport(env, site.id, "backup", false, { error: `${e instanceof Error ? e.message : e}${update ? " (updates skipped)" : ""}` });
   }
-  await sendCommand(env, site, "backup", { name, put_url, update, ...(only && { only }) });
+  // long job: log that it started so the dashboard shows something until the site reports back
+  if (await sendCommand(env, site, "backup", { name, put_url, update, ...(only && { only }) }))
+    await insertReport(env, site.id, "queued", true, { job: update ? "Backup & update" : "Backup" });
 }
 
 // key = Drive file id; only ids this site reported as its own backups

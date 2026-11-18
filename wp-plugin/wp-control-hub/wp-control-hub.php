@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Requires PHP: 7.4
  */
 
@@ -10,6 +10,8 @@ defined('ABSPATH') || exit;
 
 define('WPCH_OPT', 'wpch_connection');
 define('WPCH_DIR', WP_CONTENT_DIR . '/wpch-backups');
+// not worth backing up: our temp files, caches, WP upgrade temp dirs, other backup plugins' archives
+define('WPCH_SKIP', '#^' . preg_quote(WP_CONTENT_DIR, '#') . '/(wpch-backups|cache|upgrade|upgrade-temp-backup|wpvividbackups|updraft|ai1wm-backups|backups-dup-lite|backups-dup-pro|backup-db|uploads/backup-guard)/#');
 
 const WPCH_SIGNATURES = [
 	'eval() of encoded payload'       => '/\beval\s*\(\s*(?:base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|strrev)\s*\(/i',
@@ -172,6 +174,16 @@ function wpch_run_job($cmd, $args) {
 	ignore_user_abort(true);
 	@set_time_limit(0);
 	wp_raise_memory_limit('admin');
+	// one heavy job at a time: a second backup during an update would zip a half-updated site
+	$heavy = in_array($cmd, ['backup', 'restore'], true);
+	if ($heavy) {
+		$since = (int) get_option('wpch_lock');
+		if ($since && time() - $since < 2 * HOUR_IN_SECONDS) {
+			wpch_report($cmd, false, ['error' => 'Skipped: another backup, update or restore is still running on this site.']);
+			return;
+		}
+		update_option('wpch_lock', time(), false);
+	}
 	try {
 		switch ($cmd) {
 			case 'status':  wpch_report('status', true, wpch_status()); break;
@@ -181,6 +193,8 @@ function wpch_run_job($cmd, $args) {
 		}
 	} catch (Throwable $e) {
 		wpch_report($cmd, false, ['error' => $e->getMessage()]);
+	} finally {
+		if ($heavy) delete_option('wpch_lock');
 	}
 }
 
@@ -223,7 +237,8 @@ function wpch_status() {
 
 function wpch_files($dir) {
 	if (!is_dir($dir)) return;
-	$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+	// CATCH_GET_CHILD: skip folders that vanish mid-walk (WP deletes upgrade temp dirs during updates)
+	$it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::LEAVES_ONLY, RecursiveIteratorIterator::CATCH_GET_CHILD);
 	foreach ($it as $f) {
 		if ($f->isFile()) yield $f->getPathname();
 	}
@@ -333,7 +348,7 @@ function wpch_make_backup() {
 	if ($zip->open($zipfile, ZipArchive::CREATE) !== true) throw new Exception('Cannot create zip');
 	$zip->addFile($sql, 'wpch-db.sql');
 	foreach (wpch_files(ABSPATH) as $path) {
-		if (strpos($path, WPCH_DIR) === 0 || strpos($path, WP_CONTENT_DIR . '/cache/') === 0) continue;
+		if (preg_match(WPCH_SKIP, $path)) continue;
 		$zip->addFile($path, substr($path, strlen(ABSPATH)));
 	}
 	$ok = $zip->close();

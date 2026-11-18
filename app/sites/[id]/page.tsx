@@ -34,9 +34,12 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
   const findings: { file: string; reason: string }[] = scan ? JSON.parse(scan.data).findings : [];
   const issues = adminIssues(site, status, Number(env.MAX_ADMINS));
   const updates: { id?: string; type: string; name: string; from: string; to: string }[] = statusData?.updates ?? [];
+  // a backup was sent and the site hasn't reported back yet (backups of big sites take several minutes)
+  const running = reports[0]?.type === "queued" && Date.now() - reports[0].created_at < 30 * 60_000;
 
   return (
     <>
+      {running && <meta httpEquiv="refresh" content="15" />}
       <nav className={`mb-4 ${muted}`} aria-label="Breadcrumb">
         <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-100">Sites</Link> <span aria-hidden>/</span> {host(site.url)}
       </nav>
@@ -60,6 +63,12 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
           </SubmitButton>
         </form>
       </div>
+
+      {running && (
+        <p role="status" className="mb-6 rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:bg-blue-500/10 dark:text-blue-300">
+          {JSON.parse(reports[0].data).job} running on the site. This can take several minutes; the page refreshes until it finishes.
+        </p>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
@@ -105,14 +114,15 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                   const d = JSON.parse(r.data);
                   const rolledBack = r.type === "update" && r.ok && d.rolled_back;
                   const detail = !r.ok ? d.error
+                    : r.type === "queued" ? `${d.job} started`
                     : r.type === "update" ? (rolledBack ? `Rolled back: ${d.reason}` : `${d.updated.length} updated${d.failed?.length ? `, ${d.failed.length} failed` : ""}`)
                     : r.type === "scan" ? `${d.findings.length} findings`
                     : r.type === "backup" ? `${(d.size / 1e6).toFixed(1)} MB uploaded` : "";
                   return (
                     <li key={r.id} className="flex gap-3 text-sm">
-                      <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${!r.ok ? "bg-red-500" : rolledBack ? "bg-amber-500" : "bg-emerald-500"}`} />
+                      <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${!r.ok ? "bg-red-500" : rolledBack ? "bg-amber-500" : r.type === "queued" ? "bg-blue-500" : "bg-emerald-500"}`} />
                       <div className="min-w-0">
-                        <p><span className="font-medium capitalize">{r.type}</span> <span className="text-zinc-500">· {fmtDate(r.created_at)}</span>{!r.ok && <span className="sr-only"> failed</span>}</p>
+                        <p><span className="font-medium capitalize">{r.type === "queued" ? "Started" : r.type}</span> <span className="text-zinc-500">· {fmtDate(r.created_at)}</span>{!r.ok && <span className="sr-only"> failed</span>}</p>
                         {detail && <p className={`break-words ${!r.ok ? "text-red-600 dark:text-red-400" : "text-zinc-500"}`}>{String(detail).slice(0, 240)}</p>}
                       </div>
                     </li>
