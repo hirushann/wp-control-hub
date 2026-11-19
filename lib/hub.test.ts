@@ -125,3 +125,13 @@ test("report summary for a period", async () => {
   assert.deepEqual(s.changes.map((c) => c.text), ["Added user jo (editor)"]);
   assert.equal(updateName("core"), "WordPress core");
 });
+
+test("site attention items and tone", async () => {
+  const { siteAttention } = await import("./hub.ts");
+  const now = 10 * 86_400_000;
+  assert.deepEqual(siteAttention({ findings: 0, pending: 0, adminWarnings: 0, lastBackupAt: now - 1000, now, info: { https: true, indexing: true } }), { items: [], tone: "ok" });
+  const a = siteAttention({ findings: 2, pending: 1, adminWarnings: 0, now, info: { https: true, indexing: false, debug: true } });
+  assert.deepEqual(a.items, ["2 suspicious files", "Never backed up", "1 update pending", "Debug mode is on", "Hidden from search engines"]);
+  assert.equal(a.tone, "bad");
+  assert.equal(siteAttention({ findings: 0, pending: 0, adminWarnings: 0, lastBackupAt: now - 3 * 86_400_000, now }).tone, "warn");
+});

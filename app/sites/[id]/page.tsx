@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { manageUser, restoreBackup, runCommand, saveAllowedAdmins, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteBackups, siteReports } from "@/lib/hub";
+import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
 
 export default function SitePage({ params }: PageProps<"/sites/[id]">) {
   return (
@@ -42,17 +42,9 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
   const running = reports[0]?.type === "queued" && now - reports[0].created_at < 30 * 60_000;
   const backupAge = backups[0] ? now - backups[0].created_at : Infinity;
 
-  // everything that needs a human, most serious first
-  const attention = [
-    findings.length && `${findings.length} suspicious file${findings.length > 1 ? "s" : ""}`,
-    info && !info.https && "HTTPS is off",
-    backupAge > 2 * DAY && (backups.length ? "No backup in 2 days" : "Never backed up"),
-    issues.length && `${issues.length} admin account warning${issues.length > 1 ? "s" : ""}`,
-    updates.length && `${updates.length} update${updates.length > 1 ? "s" : ""} pending`,
-    info?.maintenance && "Maintenance mode is on",
-    info?.debug && "Debug mode is on",
-    info && !info.indexing && "Hidden from search engines",
-  ].filter(Boolean) as string[];
+  const { items: attention, tone } = siteAttention({
+    info, findings: findings.length, pending: updates.length, adminWarnings: issues.length, lastBackupAt: backups[0]?.created_at, now,
+  });
 
   return (
     <>
@@ -72,7 +64,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{info?.name ?? host(site.url)}</h1>
                 {statusData && (attention.length
-                  ? <Badge tone={findings.length || (info && !info.https) ? "bad" : "warn"}>{attention.length} to review</Badge>
+                  ? <Badge tone={tone}>{attention.length} to review</Badge>
                   : <Badge tone="ok">Healthy</Badge>)}
               </div>
               <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-zinc-500">

@@ -295,3 +295,31 @@ export function summarize(reports: Report[]) {
     })),
   };
 }
+
+// What needs a human on one site, most serious first; tone = worst of them. Shared by the dashboard and site page.
+export function siteAttention(a: {
+  info?: { https?: boolean; indexing?: boolean; maintenance?: boolean; debug?: boolean };
+  findings: number; pending: number; adminWarnings: number; lastBackupAt?: number; failedJobs?: number; now: number;
+}) {
+  const bad = [
+    a.findings && `${a.findings} suspicious file${a.findings > 1 ? "s" : ""}`,
+    a.info && a.info.https === false && "HTTPS is off",
+    a.failedJobs && `${a.failedJobs} failed job${a.failedJobs > 1 ? "s" : ""}`,
+  ];
+  const warn = [
+    (a.lastBackupAt ? a.now - a.lastBackupAt > 2 * 86_400_000 && "No backup in 2 days" : "Never backed up"),
+    a.adminWarnings && `${a.adminWarnings} admin account warning${a.adminWarnings > 1 ? "s" : ""}`,
+    a.pending && `${a.pending} update${a.pending > 1 ? "s" : ""} pending`,
+    a.info?.maintenance && "Maintenance mode is on",
+    a.info?.debug && "Debug mode is on",
+    a.info && a.info.indexing === false && "Hidden from search engines",
+  ];
+  const b = bad.filter(Boolean) as string[], w = warn.filter(Boolean) as string[];
+  return { items: [...b, ...w], tone: (b.length ? "bad" : w.length ? "warn" : "ok") as "bad" | "warn" | "ok" };
+}
+
+// newest successful backup per site
+export async function lastBackups(env: Env) {
+  const { results } = await env.DB.prepare("SELECT site_id, MAX(created_at) at FROM reports WHERE type = 'backup' AND ok = 1 GROUP BY site_id").all<{ site_id: string; at: number }>();
+  return new Map(results.map((r) => [r.site_id, r.at]));
+}

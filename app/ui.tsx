@@ -1,5 +1,4 @@
 import Link from "next/link";
-import type { Report } from "@/lib/hub";
 import { currentUser, logout } from "./actions";
 import { NavLink, SubmitButton } from "./buttons";
 
@@ -20,6 +19,7 @@ export const fmtDay = (t: number) => new Date(t).toLocaleDateString("en-GB", { d
 // 24px stroke icons, decorative (always next to a text label)
 const ICONS = {
   shield: "M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6l-8-3Z",
+  globe: "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18ZM3 12h18M12 3c2.5 2.7 3.5 5.7 3.5 9s-1 6.3-3.5 9c-2.5-2.7-3.5-5.7-3.5-9s1-6.3 3.5-9Z",
   refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7",
   archive: "M3 7h18v4H3zM5 11v8h14v-8M10 15h4",
   users: "M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM22 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8",
@@ -95,27 +95,6 @@ export function Badge({ tone, children, title }: { tone: Tone; children: React.R
       <span aria-hidden className={`size-1.5 rounded-full ${dotClass[tone]}`} />
       {children}
     </span>
-  );
-}
-
-// Latest report as a badge: no data / failed (hover for error) / caller's verdict
-export function Status({ r, tone = "ok", children }: { r?: Report; tone?: Tone; children?: React.ReactNode }) {
-  if (!r) return <Badge tone="muted">No data</Badge>;
-  return (
-    <div className="flex flex-col items-start gap-1">
-      {r.ok ? <Badge tone={tone}>{children}</Badge> : <Badge tone="bad" title={JSON.parse(r.data).error}>Failed</Badge>}
-      <span className="text-xs text-zinc-500">{ago(r.created_at)}</span>
-    </div>
-  );
-}
-
-export function Stat({ label, value, tone }: { label: string; value: number; tone?: Tone }) {
-  const color = tone === "bad" ? "text-red-600 dark:text-red-400" : tone === "warn" ? "text-amber-600 dark:text-amber-400" : "";
-  return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <p className="text-xs font-medium text-zinc-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold tabular-nums ${color}`}>{value}</p>
-    </div>
   );
 }
 
