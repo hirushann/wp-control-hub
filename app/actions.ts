@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, type BackupScope, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
+import { backup, type BackupScope, canSee, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -45,14 +45,21 @@ export async function addHubUser(form: FormData) {
   if (username === ROOT_USERNAME) teamError(`“${ROOT_USERNAME}” is reserved for the built-in super admin.`);
   if (password.length < 10) teamError("Password must be at least 10 characters.");
   if (role !== "super" && role !== "manager") teamError("Pick a role.");
+  const org = role === "manager" ? await orgFrom(form) : null; // "" = all organizations
   try {
-    await env().DB.prepare("INSERT INTO users (id, username, role, pw, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(crypto.randomUUID(), username, role, await hashPassword(password), Date.now()).run();
+    await env().DB.prepare("INSERT INTO users (id, username, role, pw, created_at, org_id) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), username, role, await hashPassword(password), Date.now(), org).run();
   } catch (e) {
     if (String(e).includes("UNIQUE")) teamError(`Username “${username}” is taken.`);
     throw e;
   }
   redirect("/team");
+}
+
+export async function setHubUserOrg(form: FormData) {
+  await requireSuper();
+  await env().DB.prepare("UPDATE users SET org_id = ? WHERE id = ? AND role = 'manager'").bind(await orgFrom(form), String(form.get("uid"))).run();
+  redirect("/team?saved=org");
 }
 
 export async function deleteHubUser(form: FormData) {
@@ -83,9 +90,10 @@ export async function changeOwnPassword(form: FormData) {
   redirect("/account?saved=1");
 }
 
+// every site action goes through here, so a manager can't act on another organization's site by posting its id
 async function siteFrom(form: FormData) {
-  const site = await getSite(env(), String(form.get("id")));
-  if (!site) throw new Error("Site not found");
+  const [site, me] = await Promise.all([getSite(env(), String(form.get("id"))), currentUser()]);
+  if (!site || !canSee(me, site)) throw new Error("Site not found");
   return site;
 }
 
@@ -98,17 +106,21 @@ async function orgFrom(form: FormData) {
 }
 
 export async function addSite(form: FormData) {
+  const me = await currentUser();
   const url = new URL(String(form.get("url"))); // throws on garbage
   if (url.protocol !== "https:") throw new Error("Site URL must be https");
   const id = crypto.randomUUID();
   const secret = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
   await env().DB.prepare("INSERT INTO sites (id, url, secret, created_at, org_id) VALUES (?, ?, ?, ?, ?)")
-    .bind(id, url.origin + url.pathname.replace(/\/+$/, ""), secret, Date.now(), await orgFrom(form))
+    // a restricted manager's sites always land in their own organization
+    .bind(id, url.origin + url.pathname.replace(/\/+$/, ""), secret, Date.now(), me?.role === "manager" && me.org_id ? me.org_id : await orgFrom(form))
     .run();
   redirect(`/sites/${id}`);
 }
 
 export async function setSiteOrg(form: FormData) {
+  const me = await currentUser();
+  if (me?.role === "manager" && me.org_id) throw new Error("Only super admins can move sites between organizations");
   const site = await siteFrom(form);
   await env().DB.prepare("UPDATE sites SET org_id = ? WHERE id = ?").bind(await orgFrom(form), site.id).run();
   refresh();
@@ -150,6 +162,9 @@ export async function renameOrg(form: FormData) {
 export async function deleteOrg(form: FormData) {
   await requireSuper();
   const id = String(form.get("org_id"));
+  // deleting would turn their scope into "all organizations"; make the super admin decide first
+  const managers = await env().DB.prepare("SELECT COUNT(*) n FROM users WHERE org_id = ?").bind(id).first<number>("n");
+  if (managers) orgError(`${managers} manager${managers > 1 ? "s are" : " is"} assigned to this organization. Reassign or remove them on the Team page first.`);
   await env().DB.batch([
     env().DB.prepare("UPDATE sites SET org_id = NULL WHERE org_id = ?").bind(id),
     env().DB.prepare("DELETE FROM orgs WHERE id = ?").bind(id),
@@ -202,8 +217,8 @@ export async function manageUser(form: FormData) {
 
 // sites on 0.3.0+ that report an older connector; older plugins can't self-update
 export async function updateAllConnectors() {
-  const [sites, latest] = await Promise.all([getSites(env()), latestReports(env())]);
-  await Promise.allSettled(sites.filter((s) => {
+  const [sites, latest, me] = await Promise.all([getSites(env()), latestReports(env()), currentUser()]);
+  await Promise.allSettled(sites.filter((s) => canSee(me, s)).filter((s) => {
     const v = connectorVersion(latest.get(`${s.id}:status`));
     return v && v !== PLUGIN_VERSION;
   }).map((s) => updateConnector(env(), s)));

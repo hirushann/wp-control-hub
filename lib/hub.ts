@@ -37,8 +37,9 @@ export const SESSION_COOKIE = "wpch_session";
 export const SESSION_TTL = 7 * 86_400;
 export const ROOT_USERNAME = "admin";
 export type Role = "super" | "manager";
-export type HubUser = { id: string; username: string; role: Role };
-const ROOT: HubUser = { id: "root", username: ROOT_USERNAME, role: "super" };
+// org_id: managers see only that organization's sites; null = all organizations (always null for super admins)
+export type HubUser = { id: string; username: string; role: Role; org_id: string | null };
+const ROOT: HubUser = { id: "root", username: ROOT_USERNAME, role: "super", org_id: null };
 
 export async function passwordOk(env: Env, pw: string) {
   // compare HMACs so timing doesn't leak the password length/prefix
@@ -67,9 +68,9 @@ export async function checkPassword(pw: string, stored: string) {
 
 export async function authenticate(env: Env, username: string, pw: string): Promise<HubUser | null> {
   if (username === ROOT_USERNAME) return (await passwordOk(env, pw)) ? ROOT : null;
-  const row = await env.DB.prepare("SELECT id, username, role, pw FROM users WHERE username = ?").bind(username).first<HubUser & { pw: string }>();
+  const row = await env.DB.prepare("SELECT id, username, role, org_id, pw FROM users WHERE username = ?").bind(username).first<HubUser & { pw: string }>();
   if (!row || !(await checkPassword(pw, row.pw))) return null;
-  return { id: row.id, username: row.username, role: row.role };
+  return { id: row.id, username: row.username, role: row.role, org_id: row.org_id };
 }
 
 export async function createSession(env: Env, uid: string, now = Date.now()) {
@@ -82,11 +83,11 @@ export async function sessionUser(env: Env, token?: string | null): Promise<HubU
   if (!env.ADMIN_PASSWORD || !uid || !/^\d+$/.test(exp) || Number(exp) < Date.now() / 1000) return null;
   if (!safeEqual(await sign(env.ADMIN_PASSWORD, exp, `session:${uid}`), mac ?? "")) return null;
   if (uid === ROOT.id) return ROOT;
-  return env.DB.prepare("SELECT id, username, role FROM users WHERE id = ?").bind(uid).first<HubUser>();
+  return env.DB.prepare("SELECT id, username, role, org_id FROM users WHERE id = ?").bind(uid).first<HubUser>();
 }
 
 export async function hubUsers(env: Env) {
-  const { results } = await env.DB.prepare("SELECT id, username, role, created_at FROM users ORDER BY username").all<HubUser & { created_at: number }>();
+  const { results } = await env.DB.prepare("SELECT id, username, role, org_id, created_at FROM users ORDER BY username").all<HubUser & { created_at: number }>();
   return results;
 }
 
@@ -209,6 +210,10 @@ export async function runDaily(env: Env, now = Date.now()) {
     }),
   );
 }
+
+// The one access rule for sites: super admins and unrestricted managers see all, the rest only their organization's.
+export const canSee = (user: HubUser | null, site: Pick<Site, "org_id">) =>
+  !!user && (user.role === "super" || user.org_id === null || site.org_id === user.org_id);
 
 export async function getOrgs(env: Env) {
   const { results } = await env.DB.prepare(

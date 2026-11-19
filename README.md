@@ -55,4 +55,5 @@ Everyone can change their own password by clicking their name in the header. Pas
 
 Super admins group sites under organizations (e.g. one per company) on the **Organizations** page. The dashboard filters by organization,
 new sites can be filed under one, and a site's report is signed "Prepared by <organization>". Deleting an organization keeps its sites.
-Existing databases need `ALTER TABLE sites ADD COLUMN org_id TEXT;` once (see `schema.sql`).
+Managers can be limited to one organization on the **Team** page: they then only see, act on and add sites in it (checked on the server for every page and action). Super admins always see everything; an organization with managers assigned can't be deleted.
+Existing databases need `ALTER TABLE sites ADD COLUMN org_id TEXT; ALTER TABLE users ADD COLUMN org_id TEXT;` once (see `schema.sql`).

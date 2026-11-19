@@ -2,9 +2,10 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { currentUser } from "@/app/actions";
 import { PrintButton } from "@/app/buttons";
 import { Badge, bytes, fmtDay, host, Logo, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, type Env, getOrgs, getSite, siteBackups, siteReports, siteReportsSince, summarize } from "@/lib/hub";
+import { adminIssues, canSee, type Env, getOrgs, getSite, siteBackups, siteReports, siteReportsSince, summarize } from "@/lib/hub";
 
 export const metadata = { title: "Site report · WP Control Hub" };
 
@@ -25,8 +26,8 @@ async function SiteReport({ params, searchParams }: { params: Promise<{ id: stri
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const days = PERIODS.includes(Number(sp.days)) ? Number(sp.days) : 30;
   const env = getCloudflareContext().env as Env;
-  const site = await getSite(env, id);
-  if (!site) notFound();
+  const [site, me] = await Promise.all([getSite(env, id), currentUser()]);
+  if (!site || !canSee(me, site)) notFound();
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
   const since = now - days * 86_400_000;

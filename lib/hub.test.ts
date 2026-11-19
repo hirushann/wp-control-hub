@@ -135,3 +135,15 @@ test("site attention items and tone", async () => {
   assert.equal(a.tone, "bad");
   assert.equal(siteAttention({ findings: 0, pending: 0, adminWarnings: 0, lastBackupAt: now - 3 * 86_400_000, now }).tone, "warn");
 });
+
+test("site access: super and unrestricted managers see all, restricted managers only their organization", async () => {
+  const { canSee } = await import("./hub.ts");
+  const site = (org_id: string | null) => ({ org_id });
+  const mgr = (org_id: string | null) => ({ id: "u", username: "u", role: "manager" as const, org_id });
+  assert.ok(canSee({ id: "root", username: "admin", role: "super", org_id: null }, site("a")));
+  assert.ok(canSee(mgr(null), site("a")) && canSee(mgr(null), site(null)));
+  assert.ok(canSee(mgr("a"), site("a")));
+  assert.ok(!canSee(mgr("a"), site("b")), "other organization");
+  assert.ok(!canSee(mgr("a"), site(null)), "unassigned site");
+  assert.ok(!canSee(null, site(null)), "signed out");
+});

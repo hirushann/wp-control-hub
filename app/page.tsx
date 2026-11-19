@@ -2,10 +2,10 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { addSite, updateAllConnectors } from "./actions";
+import { addSite, currentUser, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
 import { ago, Badge, Card, host, Icon, inputClass, Kpi, Shell, Skeleton, type Tone } from "./ui";
-import { adminIssues, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
+import { adminIssues, canSee, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -26,10 +26,14 @@ const toneLabel = { ok: "Healthy", warn: "Review", bad: "Action needed" } as con
 async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
   await connection();
   const env = getCloudflareContext().env as Env;
-  const [sites, latest, backups, orgs, sp] = await Promise.all([getSites(env), latestReports(env), lastBackups(env), getOrgs(env), searchParams]);
+  const [allSites, latest, backups, allOrgs, sp, me] = await Promise.all([getSites(env), latestReports(env), lastBackups(env), getOrgs(env), searchParams, currentUser()]);
+  // restricted managers only ever get their own organization's sites (and see no organization tabs)
+  const sites = allSites.filter((s) => canSee(me, s));
+  const restricted = me?.role === "manager" && me.org_id !== null;
+  const orgs = restricted ? [] : allOrgs;
   // ?org=<id> one organization, ?org=none sites without one, otherwise all
   const orgFilter = typeof sp.org === "string" && (sp.org === "none" || orgs.some((o) => o.id === sp.org)) ? sp.org : "";
-  const orgNames = new Map(orgs.map((o) => [o.id, o.name]));
+  const orgNames = new Map(allOrgs.map((o) => [o.id, o.name]));
   const unassigned = sites.filter((s) => !s.org_id).length;
 
   const toolbar = (
@@ -138,7 +142,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
 
       <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
-          <h2 className="text-[15px] font-semibold tracking-tight">{!orgFilter ? "All sites" : orgFilter === "none" ? "Sites without an organization" : orgNames.get(orgFilter)}</h2>
+          <h2 className="text-[15px] font-semibold tracking-tight">{restricted ? orgNames.get(me.org_id!) : !orgFilter ? "All sites" : orgFilter === "none" ? "Sites without an organization" : orgNames.get(orgFilter)}</h2>
           <span className="text-xs text-zinc-500">{rows.length} site{rows.length === 1 ? "" : "s"}</span>
         </div>
 

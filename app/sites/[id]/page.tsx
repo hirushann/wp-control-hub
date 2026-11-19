@@ -3,10 +3,10 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
+import { currentUser, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
+import { adminIssues, canSee, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
 
 export default function SitePage({ params }: PageProps<"/sites/[id]">) {
   return (
@@ -25,9 +25,10 @@ const DAY = 86_400_000;
 async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const env = getCloudflareContext().env as Env;
-  const site = await getSite(env, id);
-  if (!site) notFound();
+  const [site, me] = await Promise.all([getSite(env, id), currentUser()]);
+  if (!site || !canSee(me, site)) notFound();
   const [reports, backups, h, orgs] = await Promise.all([siteReports(env, id), siteBackups(env, id), headers(), getOrgs(env)]);
+  const canMove = !(me?.role === "manager" && me.org_id);
   const org = orgs.find((o) => o.id === site.org_id);
   // last successful run; failures still show in Activity
   const last = (t: string) => reports.find((r) => r.type === t && r.ok);
@@ -228,7 +229,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
 
         <div className="space-y-6">
-          {orgs.length > 0 && (
+          {orgs.length > 0 && canMove && (
             <Card title="Organization">
               <form action={setSiteOrg} className="flex gap-2">
                 <input type="hidden" name="id" value={site.id} />
