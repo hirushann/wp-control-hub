@@ -113,7 +113,7 @@ async function Sites() {
           <thead className="bg-zinc-50/70 text-xs text-zinc-500 dark:bg-zinc-800/40">
             <tr>
               {["Site", "Health", "Security", "Updates", "Last backup", "WordPress"].map((h) => <th key={h} className="px-5 py-2.5 font-medium">{h}</th>)}
-              <th className="w-10 px-5 py-2.5"><span className="sr-only">Open</span></th>
+              <th className="px-5 py-2.5"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -127,7 +127,7 @@ async function Sites() {
                 <td className="px-5 py-3.5">{!x.st ? <Muted>Unknown</Muted> : x.pending ? <Badge tone="warn">{x.pending} pending</Badge> : <Badge tone="ok">Up to date</Badge>}</td>
                 <td className="px-5 py-3.5">{x.lastBackupAt ? <span className={now - x.lastBackupAt > 2 * 86_400_000 ? "text-amber-700 dark:text-amber-400" : ""}>{ago(x.lastBackupAt)}</span> : <Muted>Never</Muted>}</td>
                 <td className="px-5 py-3.5 tabular-nums text-zinc-600 dark:text-zinc-400">{x.st?.wp ?? "–"}</td>
-                <td className="px-5 py-3.5 text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-100" aria-hidden>›</td>
+                <td className="px-5 py-3.5 text-right"><ReportLink id={x.s.id} name={x.name ?? host(x.s.url)} /></td>
               </tr>
             ))}
           </tbody>
@@ -144,6 +144,7 @@ async function Sites() {
                 {x.pending > 0 && <Badge tone="warn">{x.pending} pending</Badge>}
                 <Badge tone="muted">Backup {ago(x.lastBackupAt)}</Badge>
               </div>
+              <ReportLink id={x.s.id} name={x.name ?? host(x.s.url)} />
             </li>
           ))}
         </ul>
@@ -168,6 +169,16 @@ function SiteName({ x }: { x: { s: { id: string; url: string }; name?: string } 
 
 function HealthBadge({ tone, items }: { tone: Tone; items: string[] }) {
   return <Badge tone={tone} title={items.join("\n") || undefined}>{tone === "ok" ? toneLabel.ok : `${toneLabel[tone as "warn" | "bad"]} · ${items.length}`}</Badge>;
+}
+
+// sits above the row's stretched link (relative z-10), so it opens the report instead of the site
+function ReportLink({ id, name }: { id: string; name: string }) {
+  return (
+    <Link href={`/sites/${id}/report`} aria-label={`Report for ${name}`}
+      className="relative z-10 inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 hover:border-indigo-300 hover:text-indigo-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-indigo-500/50 dark:hover:text-indigo-300">
+      <Icon name="report" className="size-3.5" /> Report
+    </Link>
+  );
 }
 
 function Muted({ children }: { children: React.ReactNode }) {
