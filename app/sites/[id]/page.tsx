@@ -130,6 +130,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                   const detail = !r.ok ? d.error
                     : r.type === "queued" ? `${d.job} started`
                     : r.type === "update" ? (rolledBack ? `Rolled back: ${d.reason}` : `${d.updated.length} updated${d.failed?.length ? `, ${d.failed.length} failed` : ""}`)
+                      + (d.failed?.length ? ` · ${d.failed.map((f: string) => `${f.split("/")[0]}: ${d.errors?.[f] ?? "no reason recorded (connector older than 0.5.1)"}`).join(" · ")}` : "")
                     : r.type === "scan" ? `${d.findings.length} findings`
                     : r.type === "backup" ? `${(d.size / 1e6).toFixed(1)} MB uploaded${scopeLabel[d.scope] ? ` (${scopeLabel[d.scope]})` : ""}`
                     : r.type === "connector" ? `Connector updated to ${d.version}`
@@ -140,7 +141,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                       <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${!r.ok ? "bg-red-500" : rolledBack ? "bg-amber-500" : r.type === "queued" ? "bg-blue-500" : "bg-emerald-500"}`} />
                       <div className="min-w-0">
                         <p><span className="font-medium capitalize">{r.type === "queued" ? "Started" : r.type}</span> <span className="text-zinc-500">· {fmtDate(r.created_at)}</span>{!r.ok && <span className="sr-only"> failed</span>}</p>
-                        {detail && <p className={`break-words ${!r.ok ? "text-red-600 dark:text-red-400" : "text-zinc-500"}`}>{String(detail).slice(0, 240)}</p>}
+                        {detail && <p className={`break-words ${!r.ok ? "text-red-600 dark:text-red-400" : "text-zinc-500"}`}>{String(detail).slice(0, 600)}</p>}
                       </div>
                     </li>
                   );

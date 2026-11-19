@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.5.0
+ * Version: 0.5.1
  * Requires PHP: 7.4
  */
 
@@ -478,9 +478,12 @@ function wpch_update($zipfile, $only = null) {
 	$skin    = new Automatic_Upgrader_Skin();
 	$updated = [];
 	$failed  = [];
-	$collect = function ($results) use (&$updated, &$failed) {
+	$errors  = []; // id => why it failed
+	$collect = function ($results) use (&$updated, &$failed, &$errors, $skin) {
 		foreach ((array) $results as $item => $r) {
-			if ($r && !is_wp_error($r)) $updated[] = $item; else $failed[] = $item;
+			if ($r && !is_wp_error($r)) { $updated[] = $item; continue; }
+			$failed[] = $item;
+			$errors[$item] = is_wp_error($r) ? wpch_update_error($r) : (wpch_last_error($skin) ?: 'WordPress gave no reason');
 		}
 	};
 	if ($plugins = $pick(array_keys(get_plugin_updates()))) $collect((new Plugin_Upgrader($skin))->bulk_upgrade($plugins));
@@ -490,9 +493,26 @@ function wpch_update($zipfile, $only = null) {
 
 	if ($problem = wpch_health_problem()) {
 		wpch_restore_zip($zipfile);
-		return ['updated' => $updated, 'failed' => $failed, 'rolled_back' => true, 'reason' => $problem];
+		return ['updated' => $updated, 'failed' => $failed, 'errors' => $errors, 'rolled_back' => true, 'reason' => $problem];
 	}
-	return ['updated' => $updated, 'failed' => $failed, 'rolled_back' => false];
+	return ['updated' => $updated, 'failed' => $failed, 'errors' => $errors, 'rolled_back' => false];
+}
+
+function wpch_update_error(WP_Error $e) {
+	// premium plugins/themes only hand WordPress a download link while their license is active
+	if ($e->get_error_code() === 'no_package') return 'No download available: activate its license on the site, or update it from the vendor.';
+	return wp_strip_all_tags($e->get_error_message());
+}
+
+// bulk upgrades usually return false and leave the real error in the skin's messages
+function wpch_last_error($skin) {
+	if (method_exists($skin, 'get_errors')) { // not on every WP version; a fatal here would roll the site back
+		foreach (array_reverse((array) $skin->get_errors()->get_error_messages()) as $m) return wp_strip_all_tags($m);
+	}
+	foreach (array_reverse((array) $skin->get_upgrade_messages()) as $m) {
+		if (stripos($m, 'error') !== false || stripos($m, 'fail') !== false || stripos($m, 'not available') !== false) return wp_strip_all_tags($m);
+	}
+	return '';
 }
 
 function wpch_backup($args) {
