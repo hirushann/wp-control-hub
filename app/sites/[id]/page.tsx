@@ -192,8 +192,10 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
             <p className="mt-4 border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800">Restoring replaces the site’s files and database. To undo a bad update, restore the backup marked “pre-update”.</p>
           </Card>
 
-          <Card title="Activity">
+          <Card title="Activity" action={reports.length > 0 && <span className="text-xs text-zinc-500">Last {reports.length}</span>}>
             {reports.length ? (
+              // scrolls inside the card; tabIndex so keyboard users can scroll it too
+              <div tabIndex={0} role="region" aria-label="Activity log" className="-mr-3 max-h-96 overflow-y-auto overscroll-contain pr-3 focus-visible:outline-2 focus-visible:outline-indigo-600">
               <ol className="relative space-y-4 before:absolute before:top-2 before:bottom-2 before:left-[3px] before:w-px before:bg-zinc-200 dark:before:bg-zinc-800">
                 {reports.map((r) => {
                   const d = JSON.parse(r.data);
@@ -218,6 +220,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                   );
                 })}
               </ol>
+              </div>
             ) : <p className={muted}>Nothing yet. Connect the plugin, then run “Check for updates”.</p>}
           </Card>
         </div>
