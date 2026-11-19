@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, type BackupScope, connectorVersion, createSession, type Env, getSite, getSites, latestReports, passwordOk, PLUGIN_VERSION, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, updateConnector } from "@/lib/hub";
+import { backup, type BackupScope, connectorVersion, createSession, type Env, getSite, getSites, latestReports, passwordOk, PLUGIN_VERSION, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -61,6 +61,15 @@ export async function saveAllowedAdmins(form: FormData) {
   await env().DB.prepare("UPDATE sites SET allowed_admins = ? WHERE id = ?")
     .bind(String(form.get("allowed_admins") ?? "").trim(), site.id)
     .run();
+  refresh();
+}
+
+export async function manageUser(form: FormData) {
+  const site = await siteFrom(form);
+  const login = String(form.get("login") ?? "").trim();
+  if (!login) return;
+  if (form.get("action") === "delete") await userCommand(env(), site, { action: "delete", login });
+  else await userCommand(env(), site, { action: "add", login, email: String(form.get("email") ?? "").trim(), role: String(form.get("role") ?? "") });
   refresh();
 }
 

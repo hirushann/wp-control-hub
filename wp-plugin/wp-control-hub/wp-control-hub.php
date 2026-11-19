@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.3.0
+ * Version: 0.4.0
  * Requires PHP: 7.4
  */
 
@@ -145,7 +145,7 @@ function wpch_verify_request(WP_REST_Request $r) {
 function wpch_command(WP_REST_Request $r) {
 	$p   = json_decode($r->get_body(), true);
 	$cmd = $p['cmd'] ?? '';
-	if (!in_array($cmd, ['status', 'scan', 'backup', 'restore', 'connector'], true)) {
+	if (!in_array($cmd, ['status', 'scan', 'backup', 'restore', 'connector', 'user'], true)) {
 		return new WP_Error('wpch_cmd', 'Unknown command', ['status' => 400]);
 	}
 	// uniqid: WP drops identical single events queued within 10 minutes
@@ -191,6 +191,7 @@ function wpch_run_job($cmd, $args) {
 			case 'backup':  wpch_backup($args); break;
 			case 'restore': wpch_restore($args); break;
 			case 'connector': wpch_self_update(); break;
+			case 'user':    wpch_user($args); break;
 		}
 	} catch (Throwable $e) {
 		wpch_report($cmd, false, ['error' => $e->getMessage()]);
@@ -202,7 +203,7 @@ function wpch_run_job($cmd, $args) {
 /* ---------- Status: admin accounts + pending updates ---------- */
 
 function wpch_admin_includes() {
-	foreach (['update', 'plugin', 'theme', 'file', 'misc', 'class-wp-upgrader'] as $f) {
+	foreach (['update', 'plugin', 'theme', 'file', 'misc', 'user', 'class-wp-upgrader'] as $f) {
 		require_once ABSPATH . "wp-admin/includes/$f.php";
 	}
 }
@@ -231,6 +232,11 @@ function wpch_status() {
 		return ['login' => $u->user_login, 'email' => $u->user_email];
 	}, get_users(['role' => 'administrator']));
 
+	// shortcut: staff only (no subscribers/customers), first 200; add paging/search if a site needs to manage customers
+	$users = array_map(function ($u) {
+		return ['login' => $u->user_login, 'email' => $u->user_email, 'role' => implode(', ', $u->roles)];
+	}, get_users(['number' => 200, 'orderby' => 'login', 'role__not_in' => ['subscriber', 'customer']]));
+
 	global $wpdb;
 	$theme = wp_get_theme();
 	$disk  = function_exists('disk_free_space') ? @disk_free_space(ABSPATH) : false;
@@ -251,7 +257,7 @@ function wpch_status() {
 	// read from disk, not a constant: right after a self-update the old code is still in memory
 	$connector = get_file_data(__FILE__, ['v' => 'Version'])['v'];
 
-	return ['wp' => get_bloginfo('version'), 'php' => PHP_VERSION, 'connector' => $connector, 'info' => $info, 'admins' => $admins, 'updates' => $updates, 'login_url' => wp_login_url()];
+	return ['wp' => get_bloginfo('version'), 'php' => PHP_VERSION, 'connector' => $connector, 'info' => $info, 'admins' => $admins, 'users' => $users, 'updates' => $updates, 'login_url' => wp_login_url()];
 }
 
 /* ---------- Malware scan ---------- */
@@ -534,5 +540,36 @@ function wpch_self_update() {
 	}
 	if (function_exists('opcache_reset')) opcache_reset();
 	wpch_report('connector', true, ['version' => get_file_data(__FILE__, ['v' => 'Version'])['v']]);
+	wpch_report('status', true, wpch_status());
+}
+
+/* ---------- Users: add / delete from the hub ---------- */
+
+function wpch_user($args) {
+	wpch_admin_includes();
+	$login = sanitize_user((string) ($args['login'] ?? ''), true);
+	if ($login === '') throw new Exception('Username is required');
+
+	if (($args['action'] ?? '') === 'add') {
+		$email = sanitize_email((string) ($args['email'] ?? ''));
+		$role  = (string) ($args['role'] ?? '');
+		if (!is_email($email)) throw new Exception("Invalid email for $login");
+		if (!get_role($role)) throw new Exception("Role \"$role\" does not exist on this site");
+		// random password never leaves the site; WordPress emails the user a link to set their own
+		$id = wp_insert_user(['user_login' => $login, 'user_email' => $email, 'role' => $role, 'user_pass' => wp_generate_password(32)]);
+		if (is_wp_error($id)) throw new Exception($id->get_error_message());
+		wp_new_user_notification($id, null, 'user');
+		wpch_report('user', true, ['action' => 'add', 'login' => $login, 'role' => $role]);
+	} elseif (($args['action'] ?? '') === 'delete') {
+		$user = get_user_by('login', $login);
+		if (!$user) throw new Exception("User $login not found");
+		$admins = get_users(['role' => 'administrator', 'exclude' => [$user->ID], 'number' => 1, 'fields' => 'ID']);
+		if (in_array('administrator', $user->roles, true) && !$admins) throw new Exception("$login is the last administrator; add another admin first");
+		// their posts go to another admin instead of being deleted
+		if (!wp_delete_user($user->ID, $admins ? (int) $admins[0] : null)) throw new Exception("Deleting $login failed");
+		wpch_report('user', true, ['action' => 'delete', 'login' => $login]);
+	} else {
+		throw new Exception('Unknown user action');
+	}
 	wpch_report('status', true, wpch_status());
 }

@@ -3,9 +3,9 @@ export type Env = CloudflareEnv & { ADMIN_PASSWORD: string; GDRIVE_CLIENT_ID: st
 export type Site = { id: string; url: string; secret: string; allowed_admins: string; created_at: number };
 export type Report = { id: number; site_id: string; type: string; ok: number; data: string; created_at: number };
 
-export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector"];
+export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector", "user"];
 // connector plugin version this hub serves at /wp-control-hub.zip; must match the plugin header (checked in hub.test.ts)
-export const PLUGIN_VERSION = "0.3.0";
+export const PLUGIN_VERSION = "0.4.0";
 export type BackupScope = "both" | "db" | "files";
 const enc = new TextEncoder();
 
@@ -124,6 +124,12 @@ export async function backup(env: Env, site: Site, update: boolean, only?: strin
 // site downloads the hub's own /wp-control-hub.zip and installs it over itself
 export async function updateConnector(env: Env, site: Site) {
   if (await sendCommand(env, site, "connector")) await insertReport(env, site.id, "queued", true, { job: "Connector update" });
+}
+
+// add: WordPress emails the new user a set-password link, so no password passes through the hub
+export async function userCommand(env: Env, site: Site, args: { action: "add"; login: string; email: string; role: string } | { action: "delete"; login: string }) {
+  if (await sendCommand(env, site, "user", args))
+    await insertReport(env, site.id, "queued", true, { job: `${args.action === "add" ? "Adding" : "Deleting"} user ${args.login}` });
 }
 
 // version the site last reported; undefined = plugin older than 0.3.0 (can't self-update, needs one manual install)

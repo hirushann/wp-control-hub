@@ -3,7 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { restoreBackup, runCommand, saveAllowedAdmins } from "@/app/actions";
+import { manageUser, restoreBackup, runCommand, saveAllowedAdmins } from "@/app/actions";
 import { SubmitButton } from "@/app/buttons";
 import { ago, Badge, Card, host, inputClass, Shell, Skeleton } from "@/app/ui";
 import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, siteBackups, siteReports } from "@/lib/hub";
@@ -132,7 +132,8 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                     : r.type === "update" ? (rolledBack ? `Rolled back: ${d.reason}` : `${d.updated.length} updated${d.failed?.length ? `, ${d.failed.length} failed` : ""}`)
                     : r.type === "scan" ? `${d.findings.length} findings`
                     : r.type === "backup" ? `${(d.size / 1e6).toFixed(1)} MB uploaded${scopeLabel[d.scope] ? ` (${scopeLabel[d.scope]})` : ""}`
-                    : r.type === "connector" ? `Connector updated to ${d.version}` : "";
+                    : r.type === "connector" ? `Connector updated to ${d.version}`
+                    : r.type === "user" ? (d.action === "add" ? `Added ${d.login} as ${d.role}` : `Deleted ${d.login}`) : "";
                   return (
                     <li key={r.id} className="flex gap-3 text-sm">
                       <span aria-hidden className={`mt-1.5 size-2 shrink-0 rounded-full ${!r.ok ? "bg-red-500" : rolledBack ? "bg-amber-500" : r.type === "queued" ? "bg-blue-500" : "bg-emerald-500"}`} />
@@ -176,21 +177,52 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
             )}
           </Card>
 
-          <Card title="Admin accounts" action={status && <span className="text-xs text-zinc-500">{ago(status.created_at)}</span>}>
+          <Card title="Users" action={status && <span className="text-xs text-zinc-500">{ago(status.created_at)}</span>}>
             {issues.length > 0 && (
               <ul className="mb-3 space-y-1 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-300">
                 {issues.map((i) => <li key={i}>⚠ {i}</li>)}
               </ul>
             )}
             {statusData ? (
-              <ul className="space-y-1.5 text-sm">
-                {statusData.admins.map((a: { login: string; email: string }) => (
-                  <li key={a.login} className="flex justify-between gap-2">
-                    <span className="font-medium">{a.login}</span><span className="truncate text-zinc-500">{a.email}</span>
+              <ul className="divide-y divide-zinc-100 text-sm dark:divide-zinc-800">
+                {/* users list comes from connector 0.4.0+; older ones only report admins */}
+                {(statusData.users ?? statusData.admins.map((a: { login: string; email: string }) => ({ ...a, role: "administrator" }))).map((u: { login: string; email: string; role: string }) => (
+                  <li key={u.login} className="flex items-center justify-between gap-2 py-2 first:pt-0">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{u.login} <span className="text-xs font-normal text-zinc-500">{u.role}</span></p>
+                      <p className="truncate text-xs text-zinc-500">{u.email}</p>
+                    </div>
+                    {statusData.users && (
+                      <form action={manageUser}>
+                        <input type="hidden" name="id" value={site.id} />
+                        <input type="hidden" name="action" value="delete" />
+                        <input type="hidden" name="login" value={u.login} />
+                        <SubmitButton variant="danger" confirm={`Delete WordPress user ${u.login} from ${host(site.url)}? Their posts move to another administrator.`}>Delete</SubmitButton>
+                      </form>
+                    )}
                   </li>
                 ))}
               </ul>
             ) : <p className={muted}>No status yet.</p>}
+            {statusData?.users ? (
+              <form action={manageUser} className="mt-4 space-y-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
+                <input type="hidden" name="id" value={site.id} />
+                <input type="hidden" name="action" value="add" />
+                <p className="text-xs font-medium text-zinc-500">Add user (they get an email to set their password)</p>
+                <label htmlFor="new_login" className="sr-only">Username</label>
+                <input id="new_login" name="login" required placeholder="Username" autoComplete="off" className={inputClass} />
+                <label htmlFor="new_email" className="sr-only">Email</label>
+                <input id="new_email" name="email" type="email" required placeholder="Email" autoComplete="off" className={inputClass} />
+                <div className="flex gap-2">
+                  <label htmlFor="new_role" className="sr-only">Role</label>
+                  <select id="new_role" name="role" defaultValue="editor" className={inputClass}>
+                    {["administrator", "editor", "author", "contributor", "subscriber"].map((r) => <option key={r} value={r}>{r[0].toUpperCase() + r.slice(1)}</option>)}
+                  </select>
+                  <SubmitButton variant="primary">Add</SubmitButton>
+                </div>
+                <p className={muted}>Subscribers and customers aren’t listed.</p>
+              </form>
+            ) : statusData && <p className={`mt-3 ${muted}`}>Update the connector to 0.4.0 to add or delete users.</p>}
             <form action={saveAllowedAdmins} className="mt-4 space-y-2 border-t border-zinc-100 pt-4 dark:border-zinc-800">
               <input type="hidden" name="id" value={site.id} />
               <label htmlFor="allowed_admins" className="block text-xs font-medium text-zinc-500">Allowed admin usernames (comma separated)</label>
