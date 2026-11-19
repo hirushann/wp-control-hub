@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { currentUser, logout } from "./actions";
 import { NavLink, SubmitButton } from "./buttons";
+import { PLUGIN_VERSION } from "@/lib/hub";
 
 export function ago(t?: number) {
   if (!t) return "never";
@@ -24,6 +25,7 @@ const ICONS = {
   archive: "M3 7h18v4H3zM5 11v8h14v-8M10 15h4",
   users: "M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM22 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8",
   report: "M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8l-5-5ZM14 3v5h5M9 13h6M9 17h6",
+  download: "M12 4v11M7 10l5 5 5-5M5 20h14",
   external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
 } as const;
 export function Icon({ name, className = "size-4" }: { name: keyof typeof ICONS; className?: string }) {
@@ -56,7 +58,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </Link>
             <MainNav />
           </div>
-          <UserNav />
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* ?v= so browsers don't hand back an older cached zip after a release */}
+            <a href={`/wp-control-hub.zip?v=${PLUGIN_VERSION}`} download="wp-control-hub.zip" title={`Download the WordPress plugin (connector ${PLUGIN_VERSION})`}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 text-sm font-medium hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800">
+              <Icon name="download" /> <span className="hidden md:inline">Plugin {PLUGIN_VERSION}</span><span className="sr-only md:hidden">Download WordPress plugin</span>
+            </a>
+            <UserNav />
+          </div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 print:max-w-none print:p-0">{children}</main>
