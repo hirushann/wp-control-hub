@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { PrintButton } from "@/app/buttons";
 import { Badge, bytes, fmtDay, host, Logo, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, type Env, getSite, siteBackups, siteReports, siteReportsSince, summarize } from "@/lib/hub";
+import { adminIssues, type Env, getOrgs, getSite, siteBackups, siteReports, siteReportsSince, summarize } from "@/lib/hub";
 
 export const metadata = { title: "Site report · WP Control Hub" };
 
@@ -30,7 +30,9 @@ async function SiteReport({ params, searchParams }: { params: Promise<{ id: stri
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
   const since = now - days * 86_400_000;
-  const [period, recent, allBackups] = await Promise.all([siteReportsSince(env, id, since), siteReports(env, id, 200), siteBackups(env, id)]);
+  const [period, recent, allBackups, orgs] = await Promise.all([siteReportsSince(env, id, since), siteReports(env, id, 200), siteBackups(env, id), getOrgs(env)]);
+  // the site's organization signs the report; falls back to the hub name
+  const sender = orgs.find((o) => o.id === site.org_id)?.name;
   const s = summarize(period);
   const status = recent.find((r) => r.type === "status" && r.ok);
   const st = status ? JSON.parse(status.data) : null;
@@ -77,7 +79,9 @@ async function SiteReport({ params, searchParams }: { params: Promise<{ id: stri
           <div className="text-sm sm:text-right">
             <p className="font-medium">{fmtDay(since)} – {fmtDay(now)}</p>
             <p className="text-zinc-500">Last {days} days · generated {fmtDay(now)}</p>
-            <p className="mt-3 inline-flex items-center gap-2 text-zinc-500 sm:justify-end"><span className="scale-75"><Logo /></span> WP Control Hub</p>
+            {sender
+              ? <p className="mt-3 text-zinc-500">Prepared by <span className="font-semibold text-zinc-900">{sender}</span></p>
+              : <p className="mt-3 inline-flex items-center gap-2 text-zinc-500 sm:justify-end"><span className="scale-75"><Logo /></span> WP Control Hub</p>}
           </div>
         </header>
 
@@ -162,7 +166,7 @@ async function SiteReport({ params, searchParams }: { params: Promise<{ id: stri
         )}
 
         <footer className="mt-10 border-t border-zinc-200 pt-4 text-xs text-zinc-400">
-          Prepared with WP Control Hub · {fmtDay(now)}
+          {sender ? `Prepared by ${sender}` : "Prepared with WP Control Hub"} · {fmtDay(now)}
         </footer>
       </article>
     </>

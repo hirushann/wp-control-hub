@@ -126,8 +126,9 @@ export function Kpi({ icon, label, value, sub, tone = "muted" }: { icon: keyof t
 async function MainNav() {
   const me = await currentUser();
   return (
-    <nav aria-label="Main" className="flex items-center gap-1 text-sm">
+    <nav aria-label="Main" className="flex items-center gap-1 overflow-x-auto text-sm">
       <NavLink href="/">Sites</NavLink>
+      {me?.role === "super" && <NavLink href="/organizations">Organizations</NavLink>}
       {me?.role === "super" && <NavLink href="/team">Team</NavLink>}
     </nav>
   );

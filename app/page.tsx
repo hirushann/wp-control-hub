@@ -5,24 +5,17 @@ import { Suspense } from "react";
 import { addSite, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
 import { ago, Badge, Card, host, Icon, inputClass, Kpi, Shell, Skeleton, type Tone } from "./ui";
-import { adminIssues, connectorVersion, type Env, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
+import { adminIssues, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
-export default function Home() {
+export default function Home({ searchParams }: PageProps<"/">) {
   return (
     <Shell>
-      <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Sites</h1>
-          <p className="mt-1 text-sm text-zinc-500">Daily checks and backups run at 02:00 UTC. Malware scans run every second day.</p>
-        </div>
-        <form action={addSite} className="flex w-full gap-2 lg:w-auto">
-          <label className="sr-only" htmlFor="url">Site URL</label>
-          <input id="url" name="url" type="url" required placeholder="https://client-site.com" className={`${inputClass} lg:w-80`} />
-          <SubmitButton variant="primary">Add site</SubmitButton>
-        </form>
+      <div className="mb-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Sites</h1>
+        <p className="mt-1 text-sm text-zinc-500">Daily checks and backups run at 02:00 UTC. Malware scans run every second day.</p>
       </div>
       <Suspense fallback={<Skeleton rows={4} />}>
-        <Sites />
+        <Sites searchParams={searchParams} />
       </Suspense>
     </Shell>
   );
@@ -30,31 +23,67 @@ export default function Home() {
 
 const toneLabel = { ok: "Healthy", warn: "Review", bad: "Action needed" } as const;
 
-async function Sites() {
+async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
   await connection();
   const env = getCloudflareContext().env as Env;
-  const [sites, latest, backups] = await Promise.all([getSites(env), latestReports(env), lastBackups(env)]);
+  const [sites, latest, backups, orgs, sp] = await Promise.all([getSites(env), latestReports(env), lastBackups(env), getOrgs(env), searchParams]);
+  // ?org=<id> one organization, ?org=none sites without one, otherwise all
+  const orgFilter = typeof sp.org === "string" && (sp.org === "none" || orgs.some((o) => o.id === sp.org)) ? sp.org : "";
+  const orgNames = new Map(orgs.map((o) => [o.id, o.name]));
+  const unassigned = sites.filter((s) => !s.org_id).length;
+
+  const toolbar = (
+    <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+      {orgs.length > 0 ? (
+        <nav aria-label="Filter by organization" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
+          {[["", "All sites", sites.length], ...orgs.map((o) => [o.id, o.name, o.sites]), ...(unassigned && unassigned < sites.length ? [["none", "No organization", unassigned]] : [])].map(([id, label, n]) => (
+            <Link key={String(id)} href={id ? `/?org=${id}` : "/"} aria-current={orgFilter === id ? "page" : undefined}
+              className={`inline-flex shrink-0 items-center gap-2 rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors ${orgFilter === id ? "border-indigo-600 bg-indigo-600 text-white" : "border-zinc-200 bg-white text-zinc-600 hover:border-zinc-300 hover:text-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"}`}>
+              {label} <span className={`rounded-full px-1.5 text-xs tabular-nums ${orgFilter === id ? "bg-white/20" : "bg-zinc-100 dark:bg-zinc-800"}`}>{n}</span>
+            </Link>
+          ))}
+        </nav>
+      ) : <span />}
+      <form action={addSite} className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
+        <label className="sr-only" htmlFor="url">Site URL</label>
+        <input id="url" name="url" type="url" required placeholder="https://client-site.com" className={`${inputClass} xl:w-72`} />
+        {orgs.length > 0 && (
+          <>
+            <label className="sr-only" htmlFor="org_id">Organization</label>
+            <select id="org_id" name="org_id" defaultValue={orgFilter === "none" ? "" : orgFilter} className={`${inputClass} sm:w-48`}>
+              <option value="">No organization</option>
+              {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+            </select>
+          </>
+        )}
+        <SubmitButton variant="primary">Add site</SubmitButton>
+      </form>
+    </div>
+  );
   const max = Number(env.MAX_ADMINS);
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
 
   if (!sites.length) {
     return (
+      <>
+      {toolbar}
       <Card>
         <div className="py-12 text-center">
           <span aria-hidden className="mx-auto grid size-12 place-items-center rounded-2xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400"><Icon name="shield" className="size-6" /></span>
           <p className="mt-4 font-semibold">No sites yet</p>
           <ol className="mx-auto mt-3 max-w-sm space-y-1 text-left text-sm text-zinc-500">
-            <li>1. Add a site’s URL above.</li>
+            <li>1. Add a site’s URL above{orgs.length ? " and pick its organization" : ""}.</li>
             <li>2. Install the connector plugin on that WordPress site (<a href="/wp-control-hub.zip" className="font-medium text-indigo-600 underline dark:text-indigo-400">download</a>).</li>
             <li>3. Paste the connection key from the site’s page into Settings → Control Hub.</li>
           </ol>
         </div>
       </Card>
+      </>
     );
   }
 
-  const rows = sites.map((s) => {
+  const allRows = sites.map((s) => {
     const r = (t: string) => latest.get(`${s.id}:${t}`);
     const status = r("status"), scan = r("scan");
     const st = status?.ok ? JSON.parse(status.data) : null;
@@ -65,11 +94,14 @@ async function Sites() {
     const failedJobs = ["status", "scan", "update", "backup", "restore", "connector"].filter((t) => r(t) && !r(t)!.ok).length;
     const lastBackupAt = backups.get(s.id);
     const attention = siteAttention({ info: st?.info, findings, pending, adminWarnings: issues.length, lastBackupAt, failedJobs, now });
-    return { s, st, scan, status, findings, pending, lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined };
+    return { s, st, scan, status, findings, pending, lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined, org: s.org_id ? orgNames.get(s.org_id) : undefined };
   });
+  // connector updates apply to every site, whatever the filter
+  const outdated = allRows.filter((x) => !!x.connector && x.connector !== PLUGIN_VERSION).length;
+  const manual = allRows.filter((x) => !!x.status?.ok && !x.connector).length;
+  const rows = allRows.filter((x) => !orgFilter || (orgFilter === "none" ? !x.s.org_id : x.s.org_id === orgFilter));
   const count = (f: (x: (typeof rows)[number]) => boolean) => rows.filter(f).length;
-  const outdated = count((x) => !!x.connector && x.connector !== PLUGIN_VERSION);
-  const manual = count((x) => !!x.status?.ok && !x.connector);
+  const showOrg = !orgFilter && orgs.length > 0;
   const healthy = count((x) => x.attention.tone === "ok");
   const malware = count((x) => x.findings > 0);
   const pendingTotal = rows.reduce((n, x) => n + x.pending, 0);
@@ -79,6 +111,8 @@ async function Sites() {
   rows.sort((a, b) => order[a.attention.tone] - order[b.attention.tone] || (a.name ?? host(a.s.url)).localeCompare(b.name ?? host(b.s.url)));
 
   return (
+    <>
+    {toolbar}
     <div className="space-y-6">
       {(outdated > 0 || manual > 0) && (
         <div className="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-950 sm:flex-row sm:items-center sm:justify-between dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
@@ -96,7 +130,7 @@ async function Sites() {
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi icon="globe" label="Sites" tone={healthy === rows.length ? "ok" : "muted"} value={sites.length} sub={`${healthy} healthy · ${rows.length - healthy} to review`} />
+        <Kpi icon="globe" label="Sites" tone={healthy === rows.length ? "ok" : "muted"} value={rows.length} sub={`${healthy} healthy · ${rows.length - healthy} to review`} />
         <Kpi icon="shield" label="Malware alerts" tone={malware ? "bad" : "ok"} value={malware ? `${malware} site${malware > 1 ? "s" : ""}` : "None"} sub={malware ? "Suspicious files found" : "All recent scans clean"} />
         <Kpi icon="refresh" label="Pending updates" tone={pendingTotal ? "warn" : "ok"} value={pendingTotal} sub={pendingTotal ? `Across ${count((x) => x.pending > 0)} site${count((x) => x.pending > 0) === 1 ? "" : "s"}` : "Everything current"} />
         <Kpi icon="archive" label="Backed up in 48h" tone={backedUp === rows.length ? "ok" : "warn"} value={`${backedUp} / ${rows.length}`} sub={backedUp === rows.length ? "All sites covered" : `${rows.length - backedUp} need a backup`} />
@@ -104,15 +138,16 @@ async function Sites() {
 
       <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
-          <h2 className="text-[15px] font-semibold tracking-tight">All sites</h2>
+          <h2 className="text-[15px] font-semibold tracking-tight">{!orgFilter ? "All sites" : orgFilter === "none" ? "Sites without an organization" : orgNames.get(orgFilter)}</h2>
           <span className="text-xs text-zinc-500">{rows.length} site{rows.length === 1 ? "" : "s"}</span>
         </div>
 
         {/* table on wide screens */}
-        <table className="hidden w-full text-left text-sm md:table">
+        <div className="hidden overflow-x-auto md:block">
+        <table className="w-full whitespace-nowrap text-left text-sm">
           <thead className="bg-zinc-50/70 text-xs text-zinc-500 dark:bg-zinc-800/40">
             <tr>
-              {["Site", "Health", "Security", "Updates", "Last backup", "WordPress"].map((h) => <th key={h} className="px-5 py-2.5 font-medium">{h}</th>)}
+              {["Site", ...(showOrg ? ["Organization"] : []), "Health", "Security", "Updates", "Last backup", "WordPress"].map((h) => <th key={h} className="px-5 py-2.5 font-medium">{h}</th>)}
               <th className="px-5 py-2.5"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
@@ -122,6 +157,7 @@ async function Sites() {
                 <td className="px-5 py-3.5">
                   <SiteName x={x} />
                 </td>
+                {showOrg && <td className="px-5 py-3.5 text-zinc-600 dark:text-zinc-400">{x.org ?? <Muted>–</Muted>}</td>}
                 <td className="px-5 py-3.5"><HealthBadge tone={x.attention.tone} items={x.attention.items} /></td>
                 <td className="px-5 py-3.5">{!x.scan ? <Muted>Not scanned</Muted> : !x.scan.ok ? <Badge tone="bad">Scan failed</Badge> : x.findings ? <Badge tone="bad">{x.findings} finding{x.findings > 1 ? "s" : ""}</Badge> : <Badge tone="ok">Clean</Badge>}</td>
                 <td className="px-5 py-3.5">{!x.st ? <Muted>Unknown</Muted> : x.pending ? <Badge tone="warn">{x.pending} pending</Badge> : <Badge tone="ok">Up to date</Badge>}</td>
@@ -132,6 +168,7 @@ async function Sites() {
             ))}
           </tbody>
         </table>
+        </div>
 
         {/* cards on phones */}
         <ul className="divide-y divide-zinc-100 md:hidden dark:divide-zinc-800">
@@ -139,6 +176,7 @@ async function Sites() {
             <li key={x.s.id} className="relative space-y-3 px-5 py-4">
               <SiteName x={x} />
               <div className="flex flex-wrap gap-2">
+                {showOrg && x.org && <Badge tone="muted">{x.org}</Badge>}
                 <HealthBadge tone={x.attention.tone} items={x.attention.items} />
                 {x.findings > 0 && <Badge tone="bad">{x.findings} finding{x.findings > 1 ? "s" : ""}</Badge>}
                 {x.pending > 0 && <Badge tone="warn">{x.pending} pending</Badge>}
@@ -150,6 +188,7 @@ async function Sites() {
         </ul>
       </section>
     </div>
+    </>
   );
 }
 

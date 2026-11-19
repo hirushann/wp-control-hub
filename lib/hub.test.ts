@@ -60,7 +60,7 @@ test("backup without Google Drive access records a failure and sends nothing to 
     return new Response(JSON.stringify({ error: "invalid_grant", error_description: "Token has been expired or revoked." }), { status: 400 });
   }) as typeof fetch;
   try {
-    await backup(env, { id: "s1", url: "https://a.com", secret: "x", allowed_admins: "", created_at: 0 }, true);
+    await backup(env, { id: "s1", url: "https://a.com", secret: "x", allowed_admins: "", created_at: 0, org_id: null }, true);
   } finally {
     globalThis.fetch = realFetch;
   }

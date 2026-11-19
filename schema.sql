@@ -3,7 +3,8 @@ CREATE TABLE IF NOT EXISTS sites (
   url TEXT NOT NULL,
   secret TEXT NOT NULL,
   allowed_admins TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  org_id TEXT -- organizations.id; NULL = no organization
 );
 -- every result the plugin sends back: status, scan, backup, update, restore
 CREATE TABLE IF NOT EXISTS reports (
@@ -23,3 +24,10 @@ CREATE TABLE IF NOT EXISTS users (
   pw TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
+-- companies/clients that sites are grouped under (e.g. one per agency)
+CREATE TABLE IF NOT EXISTS orgs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL
+);
+-- existing databases created before organizations: ALTER TABLE sites ADD COLUMN org_id TEXT;

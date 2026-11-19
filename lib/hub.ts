@@ -1,6 +1,7 @@
 // relative imports only: worker.ts (cron) bundles this file outside Next
 export type Env = CloudflareEnv & { ADMIN_PASSWORD: string; GDRIVE_CLIENT_ID: string; GDRIVE_CLIENT_SECRET: string; GDRIVE_REFRESH_TOKEN: string };
-export type Site = { id: string; url: string; secret: string; allowed_admins: string; created_at: number };
+export type Site = { id: string; url: string; secret: string; allowed_admins: string; created_at: number; org_id: string | null };
+export type Org = { id: string; name: string; created_at: number; sites: number };
 export type Report = { id: number; site_id: string; type: string; ok: number; data: string; created_at: number };
 
 export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector", "user", "settings"];
@@ -207,6 +208,13 @@ export async function runDaily(env: Env, now = Date.now()) {
       if (scanDay) await sendCommand(env, site, "scan");
     }),
   );
+}
+
+export async function getOrgs(env: Env) {
+  const { results } = await env.DB.prepare(
+    "SELECT o.*, (SELECT COUNT(*) FROM sites s WHERE s.org_id = o.id) sites FROM orgs o ORDER BY o.name COLLATE NOCASE",
+  ).all<Org>();
+  return results;
 }
 
 export async function getSites(env: Env) {

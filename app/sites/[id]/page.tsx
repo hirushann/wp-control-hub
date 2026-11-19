@@ -3,10 +3,10 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { manageUser, restoreBackup, runCommand, saveAllowedAdmins, toggleSetting } from "@/app/actions";
+import { manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
+import { adminIssues, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
 
 export default function SitePage({ params }: PageProps<"/sites/[id]">) {
   return (
@@ -27,7 +27,8 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
   const env = getCloudflareContext().env as Env;
   const site = await getSite(env, id);
   if (!site) notFound();
-  const [reports, backups, h] = await Promise.all([siteReports(env, id), siteBackups(env, id), headers()]);
+  const [reports, backups, h, orgs] = await Promise.all([siteReports(env, id), siteBackups(env, id), headers(), getOrgs(env)]);
+  const org = orgs.find((o) => o.id === site.org_id);
   // last successful run; failures still show in Activity
   const last = (t: string) => reports.find((r) => r.type === t && r.ok);
   const status = last("status"), scan = last("scan");
@@ -50,7 +51,8 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
     <>
       {running && <meta httpEquiv="refresh" content="15" />}
       <nav className={`mb-5 ${muted}`} aria-label="Breadcrumb">
-        <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-100">Sites</Link> <span aria-hidden className="mx-1">/</span> <span className="text-zinc-700 dark:text-zinc-300">{info?.name ?? host(site.url)}</span>
+        <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-100">Sites</Link> <span aria-hidden className="mx-1">/</span>
+        {org && <><Link href={`/?org=${org.id}`} className="hover:text-zinc-900 dark:hover:text-zinc-100">{org.name}</Link> <span aria-hidden className="mx-1">/</span></>} <span className="text-zinc-700 dark:text-zinc-300">{info?.name ?? host(site.url)}</span>
       </nav>
 
       {/* Site header */}
@@ -226,6 +228,20 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
 
         <div className="space-y-6">
+          {orgs.length > 0 && (
+            <Card title="Organization">
+              <form action={setSiteOrg} className="flex gap-2">
+                <input type="hidden" name="id" value={site.id} />
+                <label htmlFor="site_org" className="sr-only">Organization</label>
+                <select id="site_org" name="org_id" defaultValue={site.org_id ?? ""} className={inputClass}>
+                  <option value="">No organization</option>
+                  {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+                <SubmitButton>Save</SubmitButton>
+              </form>
+            </Card>
+          )}
+
           <Card title="Site controls">
             {info?.maintenance === undefined ? <p className={muted}>{statusData ? "Update the connector and run “Check for updates” to control these." : "Unknown until the first check."}</p> : (
               <ul className="space-y-4">

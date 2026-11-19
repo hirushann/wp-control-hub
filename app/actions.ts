@@ -89,15 +89,72 @@ async function siteFrom(form: FormData) {
   return site;
 }
 
+// "" = no organization; anything else must be an existing org id
+async function orgFrom(form: FormData) {
+  const id = String(form.get("org_id") ?? "");
+  if (!id) return null;
+  if (!(await env().DB.prepare("SELECT 1 FROM orgs WHERE id = ?").bind(id).first())) throw new Error("Organization not found");
+  return id;
+}
+
 export async function addSite(form: FormData) {
   const url = new URL(String(form.get("url"))); // throws on garbage
   if (url.protocol !== "https:") throw new Error("Site URL must be https");
   const id = crypto.randomUUID();
   const secret = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  await env().DB.prepare("INSERT INTO sites (id, url, secret, created_at) VALUES (?, ?, ?, ?)")
-    .bind(id, url.origin + url.pathname.replace(/\/+$/, ""), secret, Date.now())
+  await env().DB.prepare("INSERT INTO sites (id, url, secret, created_at, org_id) VALUES (?, ?, ?, ?, ?)")
+    .bind(id, url.origin + url.pathname.replace(/\/+$/, ""), secret, Date.now(), await orgFrom(form))
     .run();
   redirect(`/sites/${id}`);
+}
+
+export async function setSiteOrg(form: FormData) {
+  const site = await siteFrom(form);
+  await env().DB.prepare("UPDATE sites SET org_id = ? WHERE id = ?").bind(await orgFrom(form), site.id).run();
+  refresh();
+}
+
+const orgError = (msg: string) => redirect(`/organizations?error=${encodeURIComponent(msg)}`);
+const orgName = (form: FormData) => {
+  const name = String(form.get("name") ?? "").trim().replace(/\s+/g, " ");
+  if (!name || name.length > 80) orgError("Name must be 1–80 characters.");
+  return name;
+};
+
+// organizations are structure, so only super admins change them; anyone can file a site under one
+export async function addOrg(form: FormData) {
+  await requireSuper();
+  const name = orgName(form);
+  try {
+    await env().DB.prepare("INSERT INTO orgs (id, name, created_at) VALUES (?, ?, ?)").bind(crypto.randomUUID(), name, Date.now()).run();
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) orgError(`“${name}” already exists.`);
+    throw e;
+  }
+  redirect("/organizations");
+}
+
+export async function renameOrg(form: FormData) {
+  await requireSuper();
+  const name = orgName(form);
+  try {
+    await env().DB.prepare("UPDATE orgs SET name = ? WHERE id = ?").bind(name, String(form.get("org_id"))).run();
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) orgError(`“${name}” already exists.`);
+    throw e;
+  }
+  redirect("/organizations");
+}
+
+// sites stay; they just lose their organization
+export async function deleteOrg(form: FormData) {
+  await requireSuper();
+  const id = String(form.get("org_id"));
+  await env().DB.batch([
+    env().DB.prepare("UPDATE sites SET org_id = NULL WHERE org_id = ?").bind(id),
+    env().DB.prepare("DELETE FROM orgs WHERE id = ?").bind(id),
+  ]);
+  redirect("/organizations");
 }
 
 export async function runCommand(form: FormData) {

@@ -50,3 +50,9 @@ Create `.dev.vars` with `ADMIN_PASSWORD=...` and the three `GDRIVE_*` secrets, t
 Sign in as `admin` with the `ADMIN_PASSWORD` secret (built-in super admin, always works). Super admins add people under **Team**:
 *Manager* runs everything on the WordPress sites; *Super admin* can also add/remove hub users and set their passwords.
 Everyone can change their own password by clicking their name in the header. Passwords are stored as salted PBKDF2 hashes in D1. Changing `ADMIN_PASSWORD` signs everyone out; removing a user signs them out immediately.
+
+## Organizations
+
+Super admins group sites under organizations (e.g. one per company) on the **Organizations** page. The dashboard filters by organization,
+new sites can be filed under one, and a site's report is signed "Prepared by <organization>". Deleting an organization keeps its sites.
+Existing databases need `ALTER TABLE sites ADD COLUMN org_id TEXT;` once (see `schema.sql`).
