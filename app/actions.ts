@@ -148,10 +148,10 @@ export async function addSite(form: FormData) {
 }
 
 export async function setSiteOrg(form: FormData) {
-  const me = await currentUser();
-  if (isRestricted(me)) throw new Error("Only super admins can move sites between organizations");
-  const site = await siteFrom(form);
-  await env().DB.prepare("UPDATE sites SET org_id = ? WHERE id = ?").bind(await orgFrom(form), site.id).run();
+  const [me, site, org] = await Promise.all([currentUser(), siteFrom(form), orgFrom(form)]);
+  // restricted managers may only move sites between their own organizations (siteFrom already checked the current one)
+  if (isRestricted(me) && !me!.orgs.includes(org!)) throw new Error("You can only move sites into your own organizations");
+  await env().DB.prepare("UPDATE sites SET org_id = ? WHERE id = ?").bind(org, site.id).run();
   refresh();
 }
 

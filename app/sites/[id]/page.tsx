@@ -27,8 +27,11 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
   const env = getCloudflareContext().env as Env;
   const [site, me] = await Promise.all([getSite(env, id), currentUser()]);
   if (!site || !canSee(me, site)) notFound();
-  const [reports, backups, h, orgs] = await Promise.all([siteReports(env, id), siteBackups(env, id), headers(), getOrgs(env)]);
-  const canMove = !isRestricted(me);
+  const [reports, backups, h, allOrgs] = await Promise.all([siteReports(env, id), siteBackups(env, id), headers(), getOrgs(env)]);
+  const restricted = isRestricted(me);
+  // restricted managers pick only among their own organizations, and only when they have more than one
+  const orgs = restricted ? allOrgs.filter((o) => me!.orgs.includes(o.id)) : allOrgs;
+  const canMove = restricted ? orgs.length > 1 : orgs.length > 0;
   const org = orgs.find((o) => o.id === site.org_id);
   // last successful run; failures still show in Activity
   const last = (t: string) => reports.find((r) => r.type === t && r.ok);
@@ -229,13 +232,13 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
 
         <div className="space-y-6">
-          {orgs.length > 0 && canMove && (
+          {canMove && (
             <Card title="Organization">
               <form action={setSiteOrg} className="flex gap-2">
                 <input type="hidden" name="id" value={site.id} />
                 <label htmlFor="site_org" className="sr-only">Organization</label>
-                <select id="site_org" name="org_id" defaultValue={site.org_id ?? ""} className={inputClass}>
-                  <option value="">No organization</option>
+                <select key={site.org_id ?? ""} id="site_org" name="org_id" defaultValue={site.org_id ?? ""} className={inputClass}>
+                  {!restricted && <option value="">No organization</option>}
                   {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>
                 <SubmitButton>Save</SubmitButton>
