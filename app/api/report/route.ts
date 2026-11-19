@@ -1,5 +1,5 @@
 import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { type Env, getSite, insertReport, REPORT_TYPES, verify } from "@/lib/hub";
+import { type Env, getSite, insertReport, REPORT_TYPES, sendCommand, verify } from "@/lib/hub";
 
 // Plugin → hub. Must be reachable without Cloudflare Access (add a bypass rule for /api/report).
 export async function POST(req: Request) {
@@ -12,5 +12,7 @@ export async function POST(req: Request) {
   const { type, ok, data } = JSON.parse(body);
   if (!REPORT_TYPES.includes(type)) return new Response("Bad type", { status: 400 });
   await insertReport(env, site.id, type, Boolean(ok), data ?? {});
+  // the status sent along with a self-update comes from the old code still in memory; ask the new code for a fresh one
+  if (type === "connector" && ok) await sendCommand(env, site, "status");
   return new Response(null, { status: 204 });
 }
