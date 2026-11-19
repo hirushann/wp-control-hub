@@ -21,8 +21,12 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
             <LoginError searchParams={searchParams} />
           </Suspense>
           <div className="space-y-1.5">
+            <label htmlFor="username" className="block text-sm font-medium">Username</label>
+            <input id="username" name="username" required autoFocus autoComplete="username" autoCapitalize="none" className={inputClass} />
+          </div>
+          <div className="space-y-1.5">
             <label htmlFor="password" className="block text-sm font-medium">Password</label>
-            <input id="password" name="password" type="password" required autoFocus autoComplete="current-password" className={inputClass} />
+            <input id="password" name="password" type="password" required autoComplete="current-password" className={inputClass} />
           </div>
           <div className="grid">
             <SubmitButton variant="primary">Sign in</SubmitButton>
@@ -36,5 +40,5 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
 async function LoginError({ searchParams }: { searchParams: PageProps<"/login">["searchParams"] }) {
   const { error } = await searchParams;
   if (!error) return null;
-  return <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">Wrong password. Try again.</p>;
+  return <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">Wrong username or password. Try again.</p>;
 }

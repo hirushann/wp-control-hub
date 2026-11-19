@@ -28,25 +28,65 @@ export async function verify(secret: string, ts: string, body: string, sig: stri
   return safeEqual(await sign(secret, ts, body), sig);
 }
 
-/* Dashboard login: one shared ADMIN_PASSWORD secret. Session = "<expiry>.<hmac>", keyed by the
-   password, so changing the password logs everyone out. Checked in worker.ts before any page or action. */
+/* Dashboard login. Hub users live in D1 (role "super" manages hub users, "manager" runs the sites).
+   Built-in break-glass super admin: username "admin" + the ADMIN_PASSWORD secret.
+   Session = "<uid>.<expiry>.<hmac>" keyed by ADMIN_PASSWORD, so changing that secret logs everyone out;
+   the user row is re-read on every request, so a deleted user is out immediately. Checked in worker.ts. */
 export const SESSION_COOKIE = "wpch_session";
 export const SESSION_TTL = 7 * 86_400;
+export const ROOT_USERNAME = "admin";
+export type Role = "super" | "manager";
+export type HubUser = { id: string; username: string; role: Role };
+const ROOT: HubUser = { id: "root", username: ROOT_USERNAME, role: "super" };
 
 export async function passwordOk(env: Env, pw: string) {
   // compare HMACs so timing doesn't leak the password length/prefix
   return !!env.ADMIN_PASSWORD && safeEqual(await sign(env.ADMIN_PASSWORD, "pw", pw), await sign(env.ADMIN_PASSWORD, "pw", env.ADMIN_PASSWORD));
 }
 
-export async function createSession(env: Env, now = Date.now()) {
-  const exp = String(Math.floor(now / 1000) + SESSION_TTL);
-  return `${exp}.${await sign(env.ADMIN_PASSWORD, exp, "session")}`;
+const hex = (b: ArrayBuffer | Uint8Array) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+const PBKDF2_ITER = 100_000; // Workers' WebCrypto maximum
+
+async function pbkdf2(pw: string, salt: Uint8Array<ArrayBuffer>, iter: number) {
+  const key = await crypto.subtle.importKey("raw", enc.encode(pw), "PBKDF2", false, ["deriveBits"]);
+  return hex(await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations: iter }, key, 256));
 }
 
-export async function sessionValid(env: Env, token?: string | null) {
-  const [exp, mac] = (token ?? "").split(".");
-  if (!env.ADMIN_PASSWORD || !/^\d+$/.test(exp) || Number(exp) < Date.now() / 1000) return false;
-  return safeEqual(await sign(env.ADMIN_PASSWORD, exp, "session"), mac ?? "");
+// "pbkdf2$<iter>$<salt hex>$<hash hex>"
+export async function hashPassword(pw: string) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  return `pbkdf2$${PBKDF2_ITER}$${hex(salt)}$${await pbkdf2(pw, salt, PBKDF2_ITER)}`;
+}
+
+export async function checkPassword(pw: string, stored: string) {
+  const [alg, iter, salt, hash] = stored.split("$");
+  if (alg !== "pbkdf2" || !hash) return false;
+  return safeEqual(await pbkdf2(pw, Uint8Array.from(salt.match(/../g)!.map((h) => parseInt(h, 16))), Number(iter)), hash);
+}
+
+export async function authenticate(env: Env, username: string, pw: string): Promise<HubUser | null> {
+  if (username === ROOT_USERNAME) return (await passwordOk(env, pw)) ? ROOT : null;
+  const row = await env.DB.prepare("SELECT id, username, role, pw FROM users WHERE username = ?").bind(username).first<HubUser & { pw: string }>();
+  if (!row || !(await checkPassword(pw, row.pw))) return null;
+  return { id: row.id, username: row.username, role: row.role };
+}
+
+export async function createSession(env: Env, uid: string, now = Date.now()) {
+  const exp = String(Math.floor(now / 1000) + SESSION_TTL);
+  return `${uid}.${exp}.${await sign(env.ADMIN_PASSWORD, exp, `session:${uid}`)}`;
+}
+
+export async function sessionUser(env: Env, token?: string | null): Promise<HubUser | null> {
+  const [uid, exp, mac] = (token ?? "").split(".");
+  if (!env.ADMIN_PASSWORD || !uid || !/^\d+$/.test(exp) || Number(exp) < Date.now() / 1000) return null;
+  if (!safeEqual(await sign(env.ADMIN_PASSWORD, exp, `session:${uid}`), mac ?? "")) return null;
+  if (uid === ROOT.id) return ROOT;
+  return env.DB.prepare("SELECT id, username, role FROM users WHERE id = ?").bind(uid).first<HubUser>();
+}
+
+export async function hubUsers(env: Env) {
+  const { results } = await env.DB.prepare("SELECT id, username, role, created_at FROM users ORDER BY username").all<HubUser & { created_at: number }>();
+  return results;
 }
 
 // hub = this dashboard's own origin, so there's no URL to configure

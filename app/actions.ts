@@ -3,14 +3,15 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, type BackupScope, connectorVersion, createSession, type Env, getSite, getSites, latestReports, passwordOk, PLUGIN_VERSION, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, updateConnector, userCommand } from "@/lib/hub";
+import { backup, type BackupScope, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
 // shortcut: no rate limit on login; add a Cloudflare WAF rate-limit rule on POST /login
 export async function login(form: FormData) {
-  if (!(await passwordOk(env(), String(form.get("password") ?? "")))) redirect("/login?error=1");
-  (await cookies()).set(SESSION_COOKIE, await createSession(env()), {
+  const user = await authenticate(env(), String(form.get("username") ?? "").trim().toLowerCase(), String(form.get("password") ?? ""));
+  if (!user) redirect("/login?error=1");
+  (await cookies()).set(SESSION_COOKIE, await createSession(env(), user.id), {
     httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: SESSION_TTL,
   });
   redirect("/");
@@ -19,6 +20,55 @@ export async function login(form: FormData) {
 export async function logout() {
   (await cookies()).delete(SESSION_COOKIE);
   redirect("/login");
+}
+
+export async function currentUser() {
+  const token = (await cookies()).get(SESSION_COOKIE)?.value; // cookies first: marks the page dynamic before env is read
+  return sessionUser(env(), token);
+}
+
+// worker.ts already blocks anonymous requests; this is the extra check for hub-user management
+async function requireSuper() {
+  const me = await currentUser();
+  if (me?.role !== "super") throw new Error("Only super admins can manage hub users");
+  return me;
+}
+
+const teamError = (msg: string) => redirect(`/team?error=${encodeURIComponent(msg)}`);
+
+export async function addHubUser(form: FormData) {
+  await requireSuper();
+  const username = String(form.get("username") ?? "").trim().toLowerCase();
+  const password = String(form.get("password") ?? "");
+  const role = String(form.get("role"));
+  if (!/^[a-z0-9._-]{3,32}$/.test(username)) teamError("Username: 3–32 characters, letters, numbers, dot, dash or underscore.");
+  if (username === ROOT_USERNAME) teamError(`“${ROOT_USERNAME}” is reserved for the built-in super admin.`);
+  if (password.length < 10) teamError("Password must be at least 10 characters.");
+  if (role !== "super" && role !== "manager") teamError("Pick a role.");
+  try {
+    await env().DB.prepare("INSERT INTO users (id, username, role, pw, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), username, role, await hashPassword(password), Date.now()).run();
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) teamError(`Username “${username}” is taken.`);
+    throw e;
+  }
+  redirect("/team");
+}
+
+export async function deleteHubUser(form: FormData) {
+  const me = await requireSuper();
+  const id = String(form.get("uid"));
+  if (id === me.id) teamError("You can’t delete your own account.");
+  await env().DB.prepare("DELETE FROM users WHERE id = ?").bind(id).run();
+  redirect("/team");
+}
+
+export async function setHubPassword(form: FormData) {
+  await requireSuper();
+  const password = String(form.get("password") ?? "");
+  if (password.length < 10) teamError("Password must be at least 10 characters.");
+  await env().DB.prepare("UPDATE users SET pw = ? WHERE id = ?").bind(await hashPassword(password), String(form.get("uid"))).run();
+  redirect("/team?saved=1");
 }
 
 async function siteFrom(form: FormData) {

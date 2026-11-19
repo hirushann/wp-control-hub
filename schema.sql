@@ -15,3 +15,11 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS reports_site_type ON reports (site_id, type, created_at);
+-- hub (dashboard) logins; "admin" + ADMIN_PASSWORD secret is a built-in super admin outside this table
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE,
+  role TEXT NOT NULL CHECK (role IN ('super', 'manager')),
+  pw TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);

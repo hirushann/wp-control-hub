@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { Report } from "@/lib/hub";
-import { logout } from "./actions";
+import { currentUser, logout } from "./actions";
 import { SubmitButton } from "./buttons";
 
 export function ago(t?: number) {
@@ -33,9 +33,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
             <Logo /> WP Control Hub
           </Link>
-          <form action={logout}>
-            <SubmitButton>Sign out</SubmitButton>
-          </form>
+          <UserNav />
         </div>
       </header>
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">{children}</main>
@@ -108,3 +106,16 @@ export function Skeleton({ rows = 3 }: { rows?: number }) {
 
 export const inputClass =
   "h-9 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-300 dark:focus:ring-white/10";
+
+async function UserNav() {
+  const me = await currentUser();
+  return (
+    <div className="flex items-center gap-3 text-sm">
+      {me?.role === "super" && <Link href="/team" className="font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">Team</Link>}
+      {me && <span className="hidden text-zinc-500 sm:inline">{me.username} · {me.role === "super" ? "Super admin" : "Manager"}</span>}
+      <form action={logout}>
+        <SubmitButton>Sign out</SubmitButton>
+      </form>
+    </div>
+  );
+}

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { adminIssues, backup, PLUGIN_VERSION, createSession, type Env, passwordOk, sessionValid, sign, verify, type Report, type Site } from "./hub.ts";
+import { adminIssues, backup, PLUGIN_VERSION, checkPassword, createSession, type Env, hashPassword, passwordOk, sessionUser, sign, verify, type Report, type Site } from "./hub.ts";
 
 test("signature matches the plugin's PHP wpch_sign()", async () => {
   const ts = String(Math.floor(Date.now() / 1000));
@@ -27,12 +27,24 @@ test("login session", async () => {
   assert.ok(await passwordOk(env, "hunter2"));
   assert.ok(!(await passwordOk(env, "hunter")));
   assert.ok(!(await passwordOk({ ADMIN_PASSWORD: "" } as typeof env, "")), "no password set = no login");
-  const token = await createSession(env);
-  assert.ok(await sessionValid(env, token));
-  assert.ok(!(await sessionValid({ ADMIN_PASSWORD: "changed" } as typeof env, token)), "password change logs out");
-  assert.ok(!(await sessionValid(env, await createSession(env, Date.now() - 8 * 86_400_000))), "expired");
-  assert.ok(!(await sessionValid(env, token.replace(/.$/, "x"))), "tampered");
-  assert.ok(!(await sessionValid(env, null)));
+  const token = await createSession(env, "root");
+  assert.equal((await sessionUser(env, token))?.role, "super");
+  assert.equal(await sessionUser({ ADMIN_PASSWORD: "changed" } as typeof env, token), null, "secret change logs out");
+  assert.equal(await sessionUser(env, await createSession(env, "root", Date.now() - 8 * 86_400_000)), null, "expired");
+  assert.equal(await sessionUser(env, token.replace(/.$/, "x")), null, "tampered");
+  assert.equal(await sessionUser(env, token.replace(/^root/, "u2")), null, "can't swap the user id");
+  assert.equal(await sessionUser(env, null), null);
+  // non-root sessions re-read the user row: deleted user = no session
+  const gone = { ...env, DB: { prepare: () => ({ bind: () => ({ first: async () => null }) }) } } as unknown as typeof env;
+  assert.equal(await sessionUser(gone, await createSession(gone, "u1")), null);
+});
+
+test("password hashing", async () => {
+  const h = await hashPassword("correct horse");
+  assert.match(h, /^pbkdf2\$100000\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
+  assert.ok(await checkPassword("correct horse", h));
+  assert.ok(!(await checkPassword("correct hors", h)));
+  assert.notEqual(h, await hashPassword("correct horse"), "salted");
 });
 
 test("backup without Google Drive access records a failure and sends nothing to the site", async () => {

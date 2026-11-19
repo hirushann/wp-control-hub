@@ -43,3 +43,9 @@ npm run db:init:local
 
 Create `.dev.vars` with `ADMIN_PASSWORD=...` and the three `GDRIVE_*` secrets, then `npm run dev`.
 `next dev` does not run `worker.ts`, so there is **no login in dev**; use `npm run preview` to test the real login gate. `npm test` checks hub/plugin signature compatibility.
+
+## Hub users
+
+Sign in as `admin` with the `ADMIN_PASSWORD` secret (built-in super admin, always works). Super admins add people under **Team**:
+*Manager* runs everything on the WordPress sites; *Super admin* can also add/remove hub users and set their passwords.
+Passwords are stored as salted PBKDF2 hashes in D1. Changing `ADMIN_PASSWORD` signs everyone out; removing a user signs them out immediately.
