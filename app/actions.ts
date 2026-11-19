@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, type BackupScope, canSee, isRestricted, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
+import { backup, JOBS, queue, type BackupScope, canSee, isRestricted, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -214,7 +214,7 @@ export async function runCommand(form: FormData) {
   const scope = String(form.get("scope") ?? "both");
   if (cmd === "backup" || cmd === "update") await backup(env(), site, cmd === "update", only, (["db", "files"].includes(scope) ? scope : "both") as BackupScope);
   else if (cmd === "connector") await updateConnector(env(), site);
-  else if (cmd === "status" || cmd === "scan") await sendCommand(env(), site, cmd);
+  else if (cmd === "status" || cmd === "scan") await queue(env(), site, cmd, undefined, JOBS[cmd]);
   refresh();
 }
 

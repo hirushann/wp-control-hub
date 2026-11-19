@@ -4,8 +4,8 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { addSite, currentUser, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
-import { ago, Badge, Card, host, Icon, inputClass, Kpi, Shell, Skeleton, type Tone } from "./ui";
-import { adminIssues, canSee, isRestricted, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
+import { ago, Badge, Card, host, Icon, inputClass, Kpi, Running, Shell, Skeleton, type Tone } from "./ui";
+import { adminIssues, canSee, isRestricted, recentReports, runningJobs, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -68,6 +68,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
   const max = Number(env.MAX_ADMINS);
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
+  const runningBy = Map.groupBy(runningJobs(await recentReports(env, now), now), (j) => j.site_id);
 
   if (!sites.length) {
     return (
@@ -103,7 +104,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
     const fails = updateFailures(lastUpdate ? [lastUpdate] : []);
     const failedUpdates = (st?.updates ?? []).filter((u: { id?: string }) => u.id && fails.has(u.id)).length;
     const attention = siteAttention({ info: st?.info, findings, pending, adminWarnings: issues.length, lastBackupAt, failedJobs, failedUpdates, now });
-    return { s, st, scan, status, findings, pending, failedUpdates, lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined, org: s.org_id ? orgNames.get(s.org_id) : undefined };
+    return { s, st, scan, status, findings, pending, failedUpdates, running: runningBy.get(s.id) ?? [], lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined, org: s.org_id ? orgNames.get(s.org_id) : undefined };
   });
   // connector updates apply to every site, whatever the filter
   const outdated = allRows.filter((x) => !!x.connector && x.connector !== PLUGIN_VERSION).length;
@@ -122,6 +123,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
 
   return (
     <>
+    {rows.some((x) => x.running.length) && <meta httpEquiv="refresh" content="10" />}
     {toolbar}
     <div className="space-y-6">
       {(outdated > 0 || manual > 0) && (
@@ -166,6 +168,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
               <tr key={x.s.id} className="group relative hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                 <td className="px-5 py-3.5">
                   <SiteName x={x} />
+                  {x.running.length > 0 && <div className="mt-2"><RunningJobs jobs={x.running} /></div>}
                 </td>
                 {showOrg && <td className="px-5 py-3.5 text-zinc-600 dark:text-zinc-400">{x.org ?? <Muted>–</Muted>}</td>}
                 <td className="px-5 py-3.5"><HealthBadge tone={x.attention.tone} items={x.attention.items} /></td>
@@ -188,6 +191,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
               <div className="flex flex-wrap gap-2">
                 {showOrg && x.org && <Badge tone="muted">{x.org}</Badge>}
                 <HealthBadge tone={x.attention.tone} items={x.attention.items} />
+                <RunningJobs jobs={x.running} />
                 {x.findings > 0 && <Badge tone="bad">{x.findings} finding{x.findings > 1 ? "s" : ""}</Badge>}
                 {x.pending > 0 && <Badge tone="warn">{x.pending} pending</Badge>}
                 {x.failedUpdates > 0 && <Badge tone="bad">{x.failedUpdates} update{x.failedUpdates > 1 ? "s" : ""} failed</Badge>}
@@ -233,4 +237,10 @@ function ReportLink({ id, name }: { id: string; name: string }) {
 
 function Muted({ children }: { children: React.ReactNode }) {
   return <span className="text-zinc-400 dark:text-zinc-500">{children}</span>;
+}
+
+function RunningJobs({ jobs }: { jobs: { job: string }[] }) {
+  if (!jobs.length) return null;
+  // short so the table doesn't widen; names on hover and on the site page
+  return <span title={jobs.map((j) => j.job).join(", ")}><Running>{jobs.length > 1 ? `${jobs.length} running…` : "Running…"}<span className="sr-only">: {jobs.map((j) => j.job).join(", ")}</span></Running></span>;
 }

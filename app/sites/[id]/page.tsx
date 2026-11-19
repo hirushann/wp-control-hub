@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { currentUser, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports, updateFailures } from "@/lib/hub";
+import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, runningJobs, siteReports, updateFailures } from "@/lib/hub";
 
 export default function SitePage({ params, searchParams }: PageProps<"/sites/[id]">) {
   return (
@@ -61,8 +61,8 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
   ); };
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
-  // a backup was sent and the site hasn't reported back yet (backups of big sites take several minutes)
-  const running = reports[0]?.type === "queued" && now - reports[0].created_at < 30 * 60_000;
+  // jobs sent to the site that haven't reported back yet (backups of big sites take several minutes)
+  const running = runningJobs(reports, now);
   const backupAge = backups[0] ? now - backups[0].created_at : Infinity;
 
   const { items: attention, tone } = siteAttention({
@@ -71,7 +71,7 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
 
   return (
     <>
-      {running && <meta httpEquiv="refresh" content="15" />}
+      {running.length > 0 && <meta httpEquiv="refresh" content="10" />}
       <nav className={`mb-5 ${muted}`} aria-label="Breadcrumb">
         <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-100">Sites</Link> <span aria-hidden className="mx-1">/</span>
         {org && <><Link href={`/?org=${org.id}`} className="hover:text-zinc-900 dark:hover:text-zinc-100">{org.name}</Link> <span aria-hidden className="mx-1">/</span></>} <span className="text-zinc-700 dark:text-zinc-300">{info?.name ?? host(site.url)}</span>
@@ -110,8 +110,8 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
             </Link>
             <form action={runCommand}>
               <input type="hidden" name="id" value={site.id} />
-              <SubmitButton name="cmd" value="update" variant="primary" confirm="Back up, then install all updates? It rolls back automatically if the site breaks.">
-                Back up &amp; update all
+              <SubmitButton name="cmd" value="update" variant="primary" confirm="Back up, then install all updates except premium ones? It rolls back automatically if the site breaks.">
+                Back up &amp; update
               </SubmitButton>
             </form>
           </div>
@@ -123,11 +123,18 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
         )}
       </section>
 
-      {running && (
-        <p role="status" className="mb-6 flex items-center gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
-          <span aria-hidden className="size-2 animate-pulse rounded-full bg-indigo-500" />
-          {JSON.parse(reports[0].data).job} running on the site. This can take several minutes; the page refreshes until it finishes.
-        </p>
+      {running.length > 0 && (
+        <div role="status" className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+          <ul className="space-y-1.5">
+            {running.map((j) => (
+              <li key={j.id} className="flex items-center gap-3">
+                <span aria-hidden className="size-4 shrink-0 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent motion-reduce:animate-none" />
+                <span><span className="font-medium">{j.job}</span> running on the site · started {ago(j.created_at)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-indigo-700/80 dark:text-indigo-300/80">Checks take under a minute; backups and updates can take several. This page refreshes until they finish.</p>
+        </div>
       )}
 
       {/* Key numbers */}

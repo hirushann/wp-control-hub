@@ -164,3 +164,25 @@ test("update failures: latest attempt wins, rollbacks count, crashed runs are ig
   assert.match(f.get("c/c.php")!.reason, /undone because home page returned HTTP 500/);
   assert.ok(!f.has("a/a.php"), "a later success clears an older failure");
 });
+
+test("running jobs: done when the matching result arrives, update runs end early without updates, old ones time out", async () => {
+  const { runningJobs } = await import("./hub.ts");
+  let n = 0;
+  const rep = (type: string, data: object, ok = 1, at = 1000) => ({ id: ++n, site_id: "s", type, ok, data: JSON.stringify(data), created_at: at });
+  const now = 1000;
+  const scan = rep("queued", { job: "Malware scan", kind: "scan" });
+  const status = rep("queued", { job: "Checking for updates", kind: "status" });
+  const upd = rep("queued", { job: "Backup & update", kind: "update" });
+  const quiet = rep("queued", { job: "Backup & update", kind: "update" });
+  const stale = rep("queued", { job: "Backup", kind: "backup" }, 1, now - 31 * 60_000);
+  const names = (rs: object[]) => runningJobs(rs as never, now).map((j) => j.id);
+  const base = [scan, status, upd, quiet, stale];
+  assert.deepEqual(names(base), [scan.id, status.id, upd.id, quiet.id], "all running except the timed-out one");
+  // a status result doesn't finish the scan; a backup with updates pending doesn't finish "Backup & update"
+  const r1 = rep("status", {}), r2 = rep("backup", { update: true });
+  assert.deepEqual(names([...base, r1, r2]), [scan.id, upd.id, quiet.id], "status done; backup with updates to come doesn't end an update job");
+  assert.deepEqual(names([...base, r1, r2, rep("update", { updated: [] })]), [scan.id], "update result ends it");
+  assert.deepEqual(names([...base, r1, rep("backup", { update: false })]), [scan.id], "nothing to update: the backup ends it");
+  assert.deepEqual(names([...base, r1, rep("backup", { error: "x" }, 0)]), [scan.id], "failed backup ends it");
+  assert.deepEqual(names([...base, r1, rep("update", {}), rep("scan", { error: "x" }, 0)]), [], "a failed result ends a job too");
+});

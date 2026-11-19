@@ -107,6 +107,16 @@ export function Badge({ tone, children, title }: { tone: Tone; children: React.R
   );
 }
 
+// spinner + job name, for work still running on a site
+export function Running({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700 ring-1 ring-inset ring-indigo-600/20 dark:bg-indigo-500/10 dark:text-indigo-300 dark:ring-indigo-400/30">
+      <span aria-hidden className="size-3 animate-spin rounded-full border-[1.5px] border-current border-t-transparent motion-reduce:animate-none" />
+      {children}
+    </span>
+  );
+}
+
 export function Skeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="space-y-3" aria-label="Loading">

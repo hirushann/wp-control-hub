@@ -163,14 +163,41 @@ export async function backup(env: Env, site: Site, update: boolean, only?: strin
     // no backup → no update either; say why in Activity instead of failing silently
     return insertReport(env, site.id, "backup", false, { error: `${e instanceof Error ? e.message : e}${update ? " (updates skipped)" : ""}` });
   }
-  // long job: log that it started so the dashboard shows something until the site reports back
-  if (await sendCommand(env, site, "backup", { name, put_url, update, scope, ...(only && { only }) }))
-    await insertReport(env, site.id, "queued", true, { job: update ? "Backup & update" : scope === "db" ? "Database backup" : scope === "files" ? "Files backup" : "Backup" });
+  await queue(env, site, "backup", { name, put_url, update, scope, ...(only && { only }) },
+    update ? "Backup & update" : scope === "db" ? "Database backup" : scope === "files" ? "Files backup" : "Backup", update ? "update" : "backup");
+}
+
+// send a command and log that it started, so pages show it running until the site reports back.
+// kind = the report type that means it finished
+export async function queue(env: Env, site: Site, cmd: string, args: Record<string, unknown> | undefined, job: string, kind = cmd) {
+  if (await sendCommand(env, site, cmd, args)) await insertReport(env, site.id, "queued", true, { job, kind });
+}
+
+const JOB_TIMEOUT = 30 * 60_000; // no reply by then: assume the site never ran it
+
+const finishes = (kind: string | undefined, r: Report) =>
+  !kind ? r.type !== "queued" // markers from before kinds were recorded
+  : r.type === kind
+    // "Backup & update" ends at the backup report when the backup failed or there was nothing to update
+    || (kind === "update" && r.type === "backup" && (!r.ok || !JSON.parse(r.data).update));
+
+// started jobs with no result yet, oldest first; reports in any order
+export function runningJobs(reports: Report[], now: number) {
+  return reports
+    .filter((q) => q.type === "queued" && now - q.created_at < JOB_TIMEOUT)
+    .map((q) => ({ ...q, ...(JSON.parse(q.data) as { job: string; kind?: string }) }))
+    .filter((q) => !reports.some((r) => r.site_id === q.site_id && r.id > q.id && finishes(q.kind, r)))
+    .sort((a, b) => a.id - b.id);
+}
+
+export async function recentReports(env: Env, now: number) {
+  const { results } = await env.DB.prepare("SELECT * FROM reports WHERE created_at > ?").bind(now - JOB_TIMEOUT).all<Report>();
+  return results;
 }
 
 // site downloads the hub's own /wp-control-hub.zip and installs it over itself
 export async function updateConnector(env: Env, site: Site) {
-  if (await sendCommand(env, site, "connector")) await insertReport(env, site.id, "queued", true, { job: "Connector update" });
+  await queue(env, site, "connector", undefined, "Connector update");
 }
 
 // add: WordPress emails the new user a set-password link, so no password passes through the hub
@@ -178,13 +205,11 @@ export const SETTINGS = { maintenance: "Maintenance mode", debug: "Debug mode", 
 export type Setting = keyof typeof SETTINGS;
 
 export async function siteSetting(env: Env, site: Site, setting: Setting, on: boolean) {
-  if (await sendCommand(env, site, "settings", { [setting]: on }))
-    await insertReport(env, site.id, "queued", true, { job: `Turning ${SETTINGS[setting].toLowerCase()} ${on ? "on" : "off"}` });
+  await queue(env, site, "settings", { [setting]: on }, `Turning ${SETTINGS[setting].toLowerCase()} ${on ? "on" : "off"}`);
 }
 
 export async function userCommand(env: Env, site: Site, args: { action: "add"; login: string; email: string; role: string } | { action: "delete"; login: string }) {
-  if (await sendCommand(env, site, "user", args))
-    await insertReport(env, site.id, "queued", true, { job: `${args.action === "add" ? "Adding" : "Deleting"} user ${args.login}` });
+  await queue(env, site, "user", args, `${args.action === "add" ? "Adding" : "Deleting"} user ${args.login}`);
 }
 
 // version the site last reported; undefined = plugin older than 0.3.0 (can't self-update, needs one manual install)
@@ -198,10 +223,12 @@ export async function siteOwnsBackup(env: Env, siteId: string, key: string) {
 
 export async function restore(env: Env, site: Site, key: string) {
   if (!(await siteOwnsBackup(env, site.id, key))) throw new Error("Backup does not belong to this site");
-  await sendCommand(env, site, "restore", { key });
+  await queue(env, site, "restore", { key }, "Restore");
 }
 
 const host = (url: string) => url.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+
+export const JOBS = { status: "Checking for updates", scan: "Malware scan" } as const;
 
 export async function runDaily(env: Env, now = Date.now()) {
   const { results: sites } = await env.DB.prepare("SELECT * FROM sites").all<Site>();
@@ -209,9 +236,9 @@ export async function runDaily(env: Env, now = Date.now()) {
   // shortcut: one fetch per command per site; Workers paid plan allows 1000 subrequests (~300 sites), shard the loop beyond that
   await Promise.allSettled(
     sites.map(async (site) => {
-      await sendCommand(env, site, "status");
+      await queue(env, site, "status", undefined, JOBS.status);
       await backup(env, site, true);
-      if (scanDay) await sendCommand(env, site, "scan");
+      if (scanDay) await queue(env, site, "scan", undefined, JOBS.scan);
     }),
   );
 }
