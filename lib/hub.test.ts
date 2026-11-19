@@ -104,3 +104,24 @@ test("plugin edits wp-config.php debug defines safely", () => {
   for (const r of lines) assert.deepEqual(r, { rc: 0, debug: 1, display: 1, db: r.db, beforeSettings: true });
   assert.equal(lines.length, 3);
 });
+
+test("report summary for a period", async () => {
+  const { summarize, updateName } = await import("./hub.ts");
+  const r = (id: number, type: string, ok: number, data: unknown) => ({ id, site_id: "s", type, ok, data: JSON.stringify(data), created_at: id * 1000 });
+  const s = summarize([
+    r(6, "update", 1, { updated: ["acf/acf.php"], failed: [], rolled_back: false }),
+    r(5, "update", 1, { updated: ["x/x.php"], failed: [], rolled_back: true, reason: "Home page HTTP 500" }),
+    r(4, "update", 1, { updated: ["elementor/elementor.php"], failed: ["acf/acf.php", "elementor-pro/elementor-pro.php"], errors: { "elementor-pro/elementor-pro.php": "No download" } }),
+    r(3, "backup", 1, { key: "a", size: 100, scope: "db" }),
+    r(2, "backup", 0, { error: "boom" }),
+    r(1, "user", 1, { action: "add", login: "jo", role: "editor" }),
+  ]);
+  assert.deepEqual(s.installed.map((i) => i.name), ["Acf", "Elementor"]); // rolled-back x not counted
+  assert.deepEqual(s.failedUpdates, [{ id: "elementor-pro/elementor-pro.php", name: "Elementor Pro", reason: "No download" }]); // acf later succeeded
+  assert.deepEqual(s.rollbacks, [{ at: 5000, reason: "Home page HTTP 500" }]);
+  assert.equal(s.backups.length, 1);
+  assert.equal(s.backupBytes, 100);
+  assert.equal(s.failedJobs, 1);
+  assert.deepEqual(s.changes.map((c) => c.text), ["Added user jo (editor)"]);
+  assert.equal(updateName("core"), "WordPress core");
+});

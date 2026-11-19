@@ -233,6 +233,14 @@ export async function siteReports(env: Env, siteId: string, limit = 50) {
   return results;
 }
 
+// shortcut: capped at 2000 rows; a daily cron makes ~5 rows/day, so 90 days fits easily
+export async function siteReportsSince(env: Env, siteId: string, since: number) {
+  const { results } = await env.DB.prepare("SELECT * FROM reports WHERE site_id = ? AND created_at >= ? ORDER BY id DESC LIMIT 2000")
+    .bind(siteId, since)
+    .all<Report>();
+  return results;
+}
+
 export async function siteBackups(env: Env, siteId: string) {
   const { results } = await env.DB.prepare(
     "SELECT * FROM reports WHERE site_id = ? AND type = 'backup' AND ok = 1 ORDER BY id DESC LIMIT 60",
@@ -253,4 +261,37 @@ export function adminIssues(site: Site, status: Report | undefined, maxAdmins: n
   if (admins.length > maxAdmins) issues.push(`${admins.length} admins (max ${maxAdmins})`);
   for (const a of admins) if (allowed.length && !allowed.includes(a.login)) issues.push(`Unexpected admin: ${a.login} <${a.email}>`);
   return issues;
+}
+
+// "elementor-pro/elementor-pro.php" → "Elementor Pro", "core" → "WordPress core"
+export const updateName = (id: string) =>
+  id === "core" ? "WordPress core" : id.split("/")[0].split(/[-_]/).map((w) => w && w[0].toUpperCase() + w.slice(1)).join(" ");
+
+// Client report numbers for one site over a period (reports newest first, as siteReportsSince returns them)
+export function summarize(reports: Report[]) {
+  const ok = (t: string) => reports.filter((r) => r.type === t && r.ok).map((r) => ({ ...r, d: JSON.parse(r.data) }));
+  const backups = ok("backup"), updates = ok("update"), scans = ok("scan");
+  const installed = new Map<string, number>(); // id → when, latest first
+  const failed = new Map<string, string>();
+  for (const u of updates) {
+    if (u.d.rolled_back) continue;
+    for (const id of u.d.updated ?? []) if (!installed.has(id)) installed.set(id, u.created_at);
+    for (const id of u.d.failed ?? []) if (!installed.has(id) && !failed.has(id)) failed.set(id, u.d.errors?.[id] ?? "");
+  }
+  return {
+    backups: backups.map((b) => ({ at: b.created_at, size: b.d.size as number, scope: (b.d.scope ?? "both") as BackupScope })),
+    backupBytes: backups.reduce((n, b) => n + (b.d.size ?? 0), 0),
+    installed: [...installed].map(([id, at]) => ({ id, name: updateName(id), at })),
+    failedUpdates: [...failed].filter(([id]) => !installed.has(id)).map(([id, reason]) => ({ id, name: updateName(id), reason })),
+    rollbacks: updates.filter((u) => u.d.rolled_back).map((u) => ({ at: u.created_at, reason: u.d.reason as string })),
+    scans: scans.length,
+    latestFindings: (scans[0]?.d.findings ?? []) as { file: string; reason: string }[],
+    lastScanAt: scans[0]?.created_at,
+    failedJobs: reports.filter((r) => !r.ok).length,
+    changes: [...ok("user"), ...ok("settings")].map((r) => ({
+      at: r.created_at,
+      text: r.type === "user" ? (r.d.action === "add" ? `Added user ${r.d.login} (${r.d.role})` : `Removed user ${r.d.login}`)
+        : Object.entries(r.d).map(([k, v]) => `${SETTINGS[k as Setting] ?? k} turned ${v ? "on" : "off"}`).join(", "),
+    })),
+  };
 }

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Report } from "@/lib/hub";
 import { currentUser, logout } from "./actions";
-import { SubmitButton } from "./buttons";
+import { NavLink, SubmitButton } from "./buttons";
 
 export function ago(t?: number) {
   if (!t) return "never";
@@ -13,10 +13,30 @@ export function ago(t?: number) {
 }
 
 export const host = (url: string) => url.replace(/^https?:\/\//, "");
+export const bytes = (n: number) => (n >= 1e12 ? `${(n / 1e12).toFixed(1)} TB` : n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1e6))} MB`);
+export const fmtDate = (t: number) => new Date(t).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }) + " UTC";
+export const fmtDay = (t: number) => new Date(t).toLocaleDateString("en-GB", { dateStyle: "medium", timeZone: "UTC" });
+
+// 24px stroke icons, decorative (always next to a text label)
+const ICONS = {
+  shield: "M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6l-8-3Z",
+  refresh: "M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7",
+  archive: "M3 7h18v4H3zM5 11v8h14v-8M10 15h4",
+  users: "M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM22 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8",
+  report: "M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8l-5-5ZM14 3v5h5M9 13h6M9 17h6",
+  external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+} as const;
+export function Icon({ name, className = "size-4" }: { name: keyof typeof ICONS; className?: string }) {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
 
 export function Logo() {
   return (
-    <span aria-hidden className="grid size-8 place-items-center rounded-lg bg-zinc-900 text-white dark:bg-white dark:text-zinc-900">
+    <span aria-hidden className="grid size-8 place-items-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-600/30">
       <svg viewBox="0 0 24 24" className="size-4.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 3 4 6v6c0 4.5 3.4 8.2 8 9 4.6-.8 8-4.5 8-9V6l-8-3Z" />
         <path d="m9 12 2 2 4-4" />
@@ -28,15 +48,18 @@ export function Logo() {
 export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <>
-      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
-        <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
-            <Logo /> WP Control Hub
-          </Link>
+      <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/85 backdrop-blur print:hidden dark:border-zinc-800 dark:bg-zinc-950/85">
+        <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+          <div className="flex items-center gap-8">
+            <Link href="/" className="flex items-center gap-2.5 font-semibold tracking-tight">
+              <Logo /> <span className="hidden sm:inline">WP Control Hub</span>
+            </Link>
+            <MainNav />
+          </div>
           <UserNav />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">{children}</main>
+      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6 print:max-w-none print:p-0">{children}</main>
     </>
   );
 }
@@ -45,10 +68,10 @@ export function Card({ title, action, children, className = "" }: {
   title?: React.ReactNode; action?: React.ReactNode; children: React.ReactNode; className?: string;
 }) {
   return (
-    <section className={`rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${className}`}>
+    <section className={`rounded-2xl border border-zinc-200/80 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900 ${className}`}>
       {title && (
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
-          <h2 className="text-sm font-semibold">{title}</h2>
+        <div className="flex min-h-13 items-center justify-between gap-3 border-b border-zinc-100 px-5 py-3 dark:border-zinc-800">
+          <h2 className="text-[15px] font-semibold tracking-tight">{title}</h2>
           {action}
         </div>
       )}
@@ -105,16 +128,48 @@ export function Skeleton({ rows = 3 }: { rows?: number }) {
 }
 
 export const inputClass =
-  "h-9 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm placeholder:text-zinc-400 focus:border-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-900/10 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-300 dark:focus:ring-white/10";
+  "h-9 w-full rounded-lg border border-zinc-300 bg-white px-3 text-sm placeholder:text-zinc-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/15 dark:border-zinc-700 dark:bg-zinc-950 dark:focus:border-zinc-300 dark:focus:ring-white/10";
+
+export function Kpi({ icon, label, value, sub, tone = "muted" }: { icon: keyof typeof ICONS; label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: Tone }) {
+  const iconTone = { ok: "bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400", warn: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400", bad: "bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400", muted: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400" }[tone];
+  return (
+    <div className="flex items-start gap-3.5 rounded-2xl border border-zinc-200/80 bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900">
+      <span className={`grid size-10 shrink-0 place-items-center rounded-xl ${iconTone}`}><Icon name={icon} className="size-5" /></span>
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-zinc-500">{label}</p>
+        <p className="mt-0.5 truncate text-lg font-semibold tracking-tight">{value}</p>
+        {sub && <p className="truncate text-xs text-zinc-500">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+async function MainNav() {
+  const me = await currentUser();
+  return (
+    <nav aria-label="Main" className="flex items-center gap-1 text-sm">
+      <NavLink href="/">Sites</NavLink>
+      {me?.role === "super" && <NavLink href="/team">Team</NavLink>}
+    </nav>
+  );
+}
 
 async function UserNav() {
   const me = await currentUser();
   return (
     <div className="flex items-center gap-3 text-sm">
-      {me?.role === "super" && <Link href="/team" className="font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">Team</Link>}
-      {me && <Link href="/account" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"><span className="hidden sm:inline">{me.username} · {me.role === "super" ? "Super admin" : "Manager"}</span><span className="sm:hidden">Account</span></Link>}
+      {me && (
+        <Link href="/account" className="flex items-center gap-2.5 rounded-full py-1 pr-1 pl-1 hover:bg-zinc-100 sm:pr-3 dark:hover:bg-zinc-800">
+          <span aria-hidden className="grid size-8 place-items-center rounded-full bg-indigo-50 text-xs font-semibold uppercase text-indigo-700 ring-1 ring-indigo-600/15 dark:bg-indigo-500/15 dark:text-indigo-300">{me.username.slice(0, 2)}</span>
+          <span className="hidden leading-tight sm:block">
+            <span className="block font-medium">{me.username}</span>
+            <span className="block text-xs text-zinc-500">{me.role === "super" ? "Super admin" : "Manager"}</span>
+          </span>
+          <span className="sr-only sm:hidden">Account</span>
+        </Link>
+      )}
       <form action={logout}>
-        <SubmitButton>Sign out</SubmitButton>
+        <SubmitButton variant="ghost">Sign out</SubmitButton>
       </form>
     </div>
   );

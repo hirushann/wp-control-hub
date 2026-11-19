@@ -1,9 +1,12 @@
 "use client";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useRef } from "react";
 import { useFormStatus } from "react-dom";
 
 const variants = {
-  primary: "bg-zinc-900 text-white hover:bg-zinc-700 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-200",
+  primary: "bg-indigo-600 text-white shadow-sm shadow-indigo-600/20 hover:bg-indigo-500",
+  ghost: "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100",
   secondary: "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100 dark:hover:bg-zinc-800",
   danger: "border border-red-200 bg-white text-red-700 hover:bg-red-50 dark:border-red-900 dark:bg-transparent dark:text-red-400 dark:hover:bg-red-950",
 };
@@ -21,7 +24,7 @@ export function SubmitButton({ children, name, value, confirm: message, variant 
       disabled={pending}
       aria-busy={busy}
       onClick={(e) => message && !confirm(message) && e.preventDefault()}
-      className={`inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 disabled:cursor-not-allowed disabled:opacity-60 dark:focus-visible:outline-white ${variants[variant]}`}
+      className={`inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg px-3.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:opacity-60 ${variants[variant]}`}
     >
       {busy && <span aria-hidden className="size-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />}
       {children}
@@ -32,7 +35,7 @@ export function SubmitButton({ children, name, value, confirm: message, variant 
 // "Back up" opens a dialog to pick database, files or both, then runs the backup command
 export function BackupDialog({ siteId, action }: { siteId: string; action: (form: FormData) => Promise<void> }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const option = "flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 p-3 has-checked:border-zinc-900 has-checked:bg-zinc-50 dark:border-zinc-700 dark:has-checked:border-white dark:has-checked:bg-zinc-800";
+  const option = "flex cursor-pointer items-start gap-3 rounded-lg border border-zinc-200 p-3 has-checked:border-indigo-600 has-checked:bg-indigo-50/60 dark:border-zinc-700 dark:has-checked:border-indigo-400 dark:has-checked:bg-indigo-500/10";
   return (
     <>
       <button type="button" onClick={() => ref.current?.showModal()}
@@ -52,7 +55,7 @@ export function BackupDialog({ siteId, action }: { siteId: string; action: (form
             <legend className="sr-only">What to back up</legend>
             {([["both", "Database + files", "Everything needed to restore the whole site"], ["db", "Database only", "Posts, pages, settings, users; small and fast"], ["files", "Files only", "Themes, plugins, uploads, WordPress core"]] as const).map(([v, label, hint]) => (
               <label key={v} className={option}>
-                <input type="radio" name="scope" value={v} defaultChecked={v === "both"} className="mt-1 accent-zinc-900 dark:accent-white" />
+                <input type="radio" name="scope" value={v} defaultChecked={v === "both"} className="mt-1 accent-indigo-600" />
                 <span><span className="block text-sm font-medium">{label}</span><span className="block text-xs text-zinc-500">{hint}</span></span>
               </label>
             ))}
@@ -64,5 +67,37 @@ export function BackupDialog({ siteId, action }: { siteId: string; action: (form
         </form>
       </dialog>
     </>
+  );
+}
+
+export function NavLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const path = usePathname();
+  const active = href === "/" ? path === "/" || path.startsWith("/sites") : path.startsWith(href);
+  return (
+    <Link href={href} aria-current={active ? "page" : undefined}
+      className={`rounded-lg px-3 py-1.5 font-medium transition-colors ${active ? "bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-white" : "text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"}`}>
+      {children}
+    </Link>
+  );
+}
+
+// On/off switch that submits its form; the server action flips the setting
+export function Switch({ on, label, confirm: message }: { on: boolean; label: string; confirm?: string }) {
+  const { pending } = useFormStatus();
+  return (
+    <button role="switch" aria-checked={on} aria-label={label} disabled={pending}
+      onClick={(e) => message && !confirm(message) && e.preventDefault()}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:opacity-60 ${on ? "bg-indigo-600" : "bg-zinc-300 dark:bg-zinc-700"} ${pending ? "animate-pulse" : ""}`}>
+      <span aria-hidden className={`inline-block size-5 rounded-full bg-white shadow transition-transform ${on ? "translate-x-5.5" : "translate-x-0.5"}`} />
+    </button>
+  );
+}
+
+export function PrintButton() {
+  return (
+    <button type="button" onClick={() => window.print()}
+      className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium ${variants.primary}`}>
+      Save as PDF
+    </button>
   );
 }
