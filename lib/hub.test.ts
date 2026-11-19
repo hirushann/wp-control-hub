@@ -148,3 +148,19 @@ test("site access: super and unrestricted managers see all, restricted managers 
   assert.ok(!canSee(mgr("a"), site(null)), "unassigned site");
   assert.ok(!canSee(null, site(null)), "signed out");
 });
+
+test("update failures: latest attempt wins, rollbacks count, crashed runs are ignored", async () => {
+  const { updateFailures } = await import("./hub.ts");
+  let n = 0;
+  const rep = (ok: number, d: object) => ({ id: ++n, site_id: "s", type: "update", ok, data: JSON.stringify(d), created_at: n });
+  // newest first
+  const f = updateFailures([
+    rep(0, { error: "crash" }),
+    rep(1, { updated: ["a/a.php"], failed: ["b/b.php"], errors: { "b/b.php": "license" }, rolled_back: false }),
+    rep(1, { updated: ["c/c.php"], failed: [], rolled_back: true, reason: "home page returned HTTP 500" }),
+    rep(1, { updated: [], failed: ["a/a.php"], errors: {} }),
+  ]);
+  assert.equal(f.get("b/b.php")?.reason, "license");
+  assert.match(f.get("c/c.php")!.reason, /undone because home page returned HTTP 500/);
+  assert.ok(!f.has("a/a.php"), "a later success clears an older failure");
+});

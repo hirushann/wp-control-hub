@@ -283,6 +283,19 @@ export function adminIssues(site: Site, status: Report | undefined, maxAdmins: n
 }
 
 // "elementor-pro/elementor-pro.php" → "Elementor Pro", "core" → "WordPress core"
+// Why each update didn't stick on its most recent attempt (reports newest first). A later success clears it.
+export function updateFailures(reports: Report[]) {
+  const seen = new Set<string>();
+  const out = new Map<string, { reason: string; at: number }>();
+  for (const r of reports) {
+    if (r.type !== "update" || !r.ok) continue; // a crashed run has no per-update detail
+    const d = JSON.parse(r.data);
+    for (const id of d.failed ?? []) if (!seen.has(id)) { seen.add(id); out.set(id, { reason: d.errors?.[id] || "No reason recorded", at: r.created_at }); }
+    for (const id of d.updated ?? []) if (!seen.has(id)) { seen.add(id); if (d.rolled_back) out.set(id, { reason: `Installed, then undone because ${d.reason}`, at: r.created_at }); }
+  }
+  return out;
+}
+
 export const updateName = (id: string) =>
   id === "core" ? "WordPress core" : id.split("/")[0].split(/[-_]/).map((w) => w && w[0].toUpperCase() + w.slice(1)).join(" ");
 

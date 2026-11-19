@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { currentUser, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
+import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports, updateFailures } from "@/lib/hub";
 
 export default function SitePage({ params, searchParams }: PageProps<"/sites/[id]">) {
   return (
@@ -43,6 +43,7 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
   const findings: { file: string; reason: string }[] = scan ? JSON.parse(scan.data).findings : [];
   const issues = adminIssues(site, status, Number(env.MAX_ADMINS));
   const updates: { id?: string; type: string; name: string; from: string; to: string }[] = statusData?.updates ?? [];
+  const failures = updateFailures(reports);
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
   // a backup was sent and the site hasn't reported back yet (backups of big sites take several minutes)
@@ -138,7 +139,7 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
                 <input type="hidden" name="id" value={site.id} />
                 <input type="hidden" name="pick" value="1" />
                 <ul className="-mx-2 text-sm">
-                  {updates.map((u) => (
+                  {updates.map((u) => { const fail = u.id ? failures.get(u.id) : undefined; return (
                     <li key={u.type + u.name}>
                       <label className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
                         <span className="flex min-w-0 items-center gap-3">
@@ -149,8 +150,9 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
                         </span>
                         <span className="shrink-0 font-mono text-xs text-zinc-500">{u.from} → <span className="text-zinc-900 dark:text-zinc-100">{u.to}</span></span>
                       </label>
+                      {fail && <p className="-mt-1 mb-1 px-2 pl-9 text-xs text-amber-700 dark:text-amber-400"><span className="font-medium">Last attempt failed {ago(fail.at)}:</span> {fail.reason}</p>}
                     </li>
-                  ))}
+                  ); })}
                 </ul>
                 {updates.every((u) => u.id) ? (
                   <div className="mt-4 flex items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
