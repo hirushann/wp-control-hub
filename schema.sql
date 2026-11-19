@@ -22,8 +22,13 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT NOT NULL UNIQUE,
   role TEXT NOT NULL CHECK (role IN ('super', 'manager')),
   pw TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  org_id TEXT -- managers: only this organization's sites; NULL = all organizations
+  created_at INTEGER NOT NULL
+);
+-- managers see only these organizations' sites; a manager with no rows sees all organizations
+CREATE TABLE IF NOT EXISTS user_orgs (
+  user_id TEXT NOT NULL,
+  org_id TEXT NOT NULL,
+  PRIMARY KEY (user_id, org_id)
 );
 -- companies/clients that sites are grouped under (e.g. one per agency)
 CREATE TABLE IF NOT EXISTS orgs (
@@ -31,4 +36,4 @@ CREATE TABLE IF NOT EXISTS orgs (
   name TEXT NOT NULL UNIQUE,
   created_at INTEGER NOT NULL
 );
--- existing databases created before organizations: ALTER TABLE sites ADD COLUMN org_id TEXT; ALTER TABLE users ADD COLUMN org_id TEXT;
+-- existing databases created before organizations: ALTER TABLE sites ADD COLUMN org_id TEXT; then run the user_orgs CREATE above.

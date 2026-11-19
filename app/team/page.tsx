@@ -13,7 +13,7 @@ export default function TeamPage({ searchParams }: PageProps<"/team">) {
     <Shell>
       <div className="mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">Team</h1>
-        <p className="mt-1 text-sm text-zinc-500">Who can sign in to this hub. Managers run backups, updates, scans and WordPress users on the sites they can see: one organization’s, or all. Super admins see everything and manage users and organizations.</p>
+        <p className="mt-1 text-sm text-zinc-500">Who can sign in to this hub. Managers run backups, updates, scans and WordPress users on the sites they can see: one or more organizations’, or all. Super admins see everything and manage users and organizations.</p>
       </div>
       <Suspense fallback={<Skeleton rows={3} />}>
         <Team searchParams={searchParams} />
@@ -29,12 +29,15 @@ async function Team({ searchParams }: { searchParams: PageProps<"/team">["search
   if (me?.role !== "super") notFound();
   const env = getCloudflareContext().env as Env;
   const [{ error, saved }, users, orgs] = await Promise.all([searchParams, hubUsers(env), getOrgs(env)]);
-  const orgSelect = (id: string, value: string | null) => (
-    <select id={id} name="org_id" defaultValue={value ?? ""} className={inputClass}>
-      {orgs.map((o) => <option key={o.id} value={o.id}>{o.name} only</option>)}
-      <option value="">All organizations</option>
-    </select>
+  const chip = "inline-flex items-center gap-1.5 rounded-full border border-zinc-200 px-2.5 py-1 text-xs has-[:checked]:border-indigo-600 has-[:checked]:bg-indigo-50 has-[:checked]:text-indigo-700 dark:border-zinc-700 dark:has-[:checked]:bg-indigo-500/10 dark:has-[:checked]:text-indigo-300";
+  const orgPicker = (legend: string, value: string[]) => (
+    <fieldset className="flex flex-wrap items-center gap-1.5">
+      <legend className="sr-only">{legend}</legend>
+      {orgs.map((o) => <label key={o.id} className={chip}><input type="checkbox" name="org_id" value={o.id} defaultChecked={value.includes(o.id)} className="accent-indigo-600" />{o.name}</label>)}
+      <label className={chip}><input type="checkbox" name="org_id" value="" defaultChecked={!value.length} className="accent-indigo-600" />All organizations</label>
+    </fieldset>
   );
+  const orgList = (ids: string[]) => ids.map((id) => orgs.find((o) => o.id === id)?.name ?? "Unknown organization").join(", ");
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
@@ -51,15 +54,14 @@ async function Team({ searchParams }: { searchParams: PageProps<"/team">["search
               <div>
                 <span className="flex items-center gap-2 font-medium">{u.username} <Badge tone="muted">{roleLabel[u.role]}</Badge>{u.id === me.id && <span className="text-xs font-normal text-zinc-500">you</span>}</span>
                 <span className="text-xs text-zinc-500">
-                  {u.role === "super" ? "All sites and settings" : u.org_id ? `${orgs.find((o) => o.id === u.org_id)?.name ?? "Unknown organization"} sites only` : "All organizations’ sites"}
+                  {u.role === "super" ? "All sites and settings" : u.orgs.length ? `${orgList(u.orgs)} sites only` : "All organizations’ sites"}
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
                 {u.role === "manager" && orgs.length > 0 && (
-                  <form action={setHubUserOrg} className="flex gap-2">
+                  <form action={setHubUserOrg} className="flex flex-wrap items-center gap-2">
                     <input type="hidden" name="uid" value={u.id} />
-                    <label htmlFor={`org-${u.id}`} className="sr-only">Sites {u.username} can see</label>
-                    {orgSelect(`org-${u.id}`, u.org_id)}
+                    {orgPicker(`Organizations ${u.username} can see`, u.orgs)}
                     <SubmitButton>Save</SubmitButton>
                   </form>
                 )}
@@ -100,8 +102,8 @@ async function Team({ searchParams }: { searchParams: PageProps<"/team">["search
           </div>
           {orgs.length > 0 && (
             <div className="space-y-1.5">
-              <label htmlFor="new_org" className="block text-sm font-medium">Sites they can see <span className="font-normal text-zinc-500">(managers)</span></label>
-              {orgSelect("new_org", orgs[0].id)}
+              <span className="block text-sm font-medium">Sites they can see <span className="font-normal text-zinc-500">(managers)</span></span>
+              {orgPicker("Organizations they can see", [orgs[0].id])}
             </div>
           )}
           <div className="grid"><SubmitButton variant="primary">Add user</SubmitButton></div>

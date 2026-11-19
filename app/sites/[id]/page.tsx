@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { currentUser, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, canSee, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
+import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
 
 export default function SitePage({ params }: PageProps<"/sites/[id]">) {
   return (
@@ -28,7 +28,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
   const [site, me] = await Promise.all([getSite(env, id), currentUser()]);
   if (!site || !canSee(me, site)) notFound();
   const [reports, backups, h, orgs] = await Promise.all([siteReports(env, id), siteBackups(env, id), headers(), getOrgs(env)]);
-  const canMove = !(me?.role === "manager" && me.org_id);
+  const canMove = !isRestricted(me);
   const org = orgs.find((o) => o.id === site.org_id);
   // last successful run; failures still show in Activity
   const last = (t: string) => reports.find((r) => r.type === t && r.ok);

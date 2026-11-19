@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { addSite, currentUser, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
 import { ago, Badge, Card, host, Icon, inputClass, Kpi, Shell, Skeleton, type Tone } from "./ui";
-import { adminIssues, canSee, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
+import { adminIssues, canSee, isRestricted, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -27,10 +27,11 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
   await connection();
   const env = getCloudflareContext().env as Env;
   const [allSites, latest, backups, allOrgs, sp, me] = await Promise.all([getSites(env), latestReports(env), lastBackups(env), getOrgs(env), searchParams, currentUser()]);
-  // restricted managers only ever get their own organization's sites (and see no organization tabs)
+  // restricted managers only ever get their own organizations' sites and tabs
   const sites = allSites.filter((s) => canSee(me, s));
-  const restricted = me?.role === "manager" && me.org_id !== null;
-  const orgs = restricted ? [] : allOrgs;
+  const restricted = isRestricted(me);
+  const orgs = restricted ? allOrgs.filter((o) => me!.orgs.includes(o.id)) : allOrgs;
+  const tabs = restricted ? orgs.length > 1 : orgs.length > 0;
   // ?org=<id> one organization, ?org=none sites without one, otherwise all
   const orgFilter = typeof sp.org === "string" && (sp.org === "none" || orgs.some((o) => o.id === sp.org)) ? sp.org : "";
   const orgNames = new Map(allOrgs.map((o) => [o.id, o.name]));
@@ -38,7 +39,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
 
   const toolbar = (
     <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-      {orgs.length > 0 ? (
+      {tabs ? (
         <nav aria-label="Filter by organization" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
           {[["", "All sites", sites.length], ...orgs.map((o) => [o.id, o.name, o.sites]), ...(unassigned && unassigned < sites.length ? [["none", "No organization", unassigned]] : [])].map(([id, label, n]) => (
             <Link key={String(id)} href={id ? `/?org=${id}` : "/"} aria-current={orgFilter === id ? "page" : undefined}
@@ -51,11 +52,11 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
       <form action={addSite} className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
         <label className="sr-only" htmlFor="url">Site URL</label>
         <input id="url" name="url" type="url" required placeholder="https://client-site.com" className={`${inputClass} xl:w-72`} />
-        {orgs.length > 0 && (
+        {tabs && (
           <>
             <label className="sr-only" htmlFor="org_id">Organization</label>
             <select id="org_id" name="org_id" defaultValue={orgFilter === "none" ? "" : orgFilter} className={`${inputClass} sm:w-48`}>
-              <option value="">No organization</option>
+              {!restricted && <option value="">No organization</option>}
               {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
             </select>
           </>
@@ -142,7 +143,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
 
       <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
-          <h2 className="text-[15px] font-semibold tracking-tight">{restricted ? orgNames.get(me.org_id!) : !orgFilter ? "All sites" : orgFilter === "none" ? "Sites without an organization" : orgNames.get(orgFilter)}</h2>
+          <h2 className="text-[15px] font-semibold tracking-tight">{restricted && !tabs ? orgs[0]?.name : !orgFilter ? "All sites" : orgFilter === "none" ? "Sites without an organization" : orgNames.get(orgFilter)}</h2>
           <span className="text-xs text-zinc-500">{rows.length} site{rows.length === 1 ? "" : "s"}</span>
         </div>
 
