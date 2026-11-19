@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.4.0
+ * Version: 0.5.0
  * Requires PHP: 7.4
  */
 
@@ -96,6 +96,18 @@ function wpch_filter_login_link($url) {
 	return wpch_login_url() . ($query ? "?$query" : '');
 }
 
+/* ---------- Maintenance mode: visitors get a 503 page, logged-in admins see the site ---------- */
+
+add_action('template_redirect', function () {
+	if (!get_option('wpch_maintenance') || current_user_can('manage_options')) return;
+	header('Retry-After: 3600');
+	wp_die(
+		'<h1>' . esc_html(get_bloginfo('name')) . '</h1><p>We’re doing some scheduled maintenance. Please check back soon.</p>',
+		esc_html(get_bloginfo('name')) . ' · Maintenance',
+		['response' => 503]
+	);
+});
+
 if (wpch_login_slug_on()) {
 	foreach (['site_url', 'network_site_url', 'wp_redirect'] as $hook) add_filter($hook, 'wpch_filter_login_link', 100);
 
@@ -145,7 +157,7 @@ function wpch_verify_request(WP_REST_Request $r) {
 function wpch_command(WP_REST_Request $r) {
 	$p   = json_decode($r->get_body(), true);
 	$cmd = $p['cmd'] ?? '';
-	if (!in_array($cmd, ['status', 'scan', 'backup', 'restore', 'connector', 'user'], true)) {
+	if (!in_array($cmd, ['status', 'scan', 'backup', 'restore', 'connector', 'user', 'settings'], true)) {
 		return new WP_Error('wpch_cmd', 'Unknown command', ['status' => 400]);
 	}
 	// uniqid: WP drops identical single events queued within 10 minutes
@@ -192,6 +204,7 @@ function wpch_run_job($cmd, $args) {
 			case 'restore': wpch_restore($args); break;
 			case 'connector': wpch_self_update(); break;
 			case 'user':    wpch_user($args); break;
+			case 'settings': wpch_settings($args); break;
 		}
 	} catch (Throwable $e) {
 		wpch_report($cmd, false, ['error' => $e->getMessage()]);
@@ -251,6 +264,7 @@ function wpch_status() {
 		'https'          => strpos(home_url(), 'https://') === 0,
 		'indexing'       => (bool) get_option('blog_public'),
 		'debug'          => defined('WP_DEBUG') && WP_DEBUG,
+		'maintenance'    => (bool) get_option('wpch_maintenance'),
 		'memory_limit'   => ini_get('memory_limit'),
 		'server'         => $_SERVER['SERVER_SOFTWARE'] ?? '',
 	];
@@ -572,4 +586,55 @@ function wpch_user($args) {
 		throw new Exception('Unknown user action');
 	}
 	wpch_report('status', true, wpch_status());
+}
+
+/* ---------- Site settings: debug mode (wp-config.php) and maintenance mode ---------- */
+
+function wpch_settings($args) {
+	$debug = null;
+	if (isset($args['maintenance'])) update_option('wpch_maintenance', $args['maintenance'] ? 1 : 0);
+	if (isset($args['debug'])) {
+		$debug = (bool) $args['debug'];
+		// errors go to wp-content/debug.log, never shown to visitors
+		wpch_config_set(['WP_DEBUG' => $debug, 'WP_DEBUG_LOG' => $debug, 'WP_DEBUG_DISPLAY' => false]);
+	}
+	wpch_report('settings', true, array_filter(['maintenance' => $args['maintenance'] ?? null, 'debug' => $debug], 'is_bool'));
+	$status = wpch_status();
+	if ($debug !== null) $status['info']['debug'] = $debug; // WP_DEBUG constant in memory is still the old value
+	wpch_report('status', true, $status);
+}
+
+// same lookup WordPress itself uses: ABSPATH, or one folder up
+function wpch_config_path() {
+	if (file_exists(ABSPATH . 'wp-config.php')) return ABSPATH . 'wp-config.php';
+	if (file_exists(dirname(ABSPATH) . '/wp-config.php')) return dirname(ABSPATH) . '/wp-config.php';
+	throw new Exception('wp-config.php not found');
+}
+
+// Sets define()s in wp-config.php: replaces existing ones, else inserts before the "stop editing" line.
+function wpch_config_set($consts) {
+	$file = wpch_config_path();
+	$src  = file_get_contents($file);
+	if ($src === false || !is_writable($file)) throw new Exception('wp-config.php is not writable by PHP');
+	foreach ($consts as $name => $value) {
+		$line = "define( '$name', " . ($value ? 'true' : 'false') . ' );';
+		$re   = '/define\s*\(\s*([\'"])' . $name . '\1\s*,\s*[^)]*\)\s*;/';
+		if (preg_match($re, $src)) {
+			$src = preg_replace($re, $line, $src, 1);
+			continue;
+		}
+		$at = stripos($src, "/* That's all");
+		if ($at === false && preg_match('/require_once\s*\(?\s*ABSPATH\s*\.\s*[\'"]wp-settings\.php/', $src, $m, PREG_OFFSET_CAPTURE)) $at = $m[0][1];
+		if ($at === false) throw new Exception("Can't find where to add $name in wp-config.php");
+		$src = substr_replace($src, "$line\n", $at, 0);
+	}
+	// write a temp file and rename over: a half-written wp-config.php would take the site down
+	$tmp = $file . '.wpch-' . wp_generate_password(8, false);
+	if (file_put_contents($tmp, $src) === false) throw new Exception('Could not write wp-config.php');
+	@chmod($tmp, fileperms($file) & 0777);
+	if (!rename($tmp, $file)) {
+		@unlink($tmp);
+		throw new Exception('Could not replace wp-config.php');
+	}
+	if (function_exists('opcache_invalidate')) opcache_invalidate($file, true);
 }

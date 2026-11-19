@@ -112,7 +112,7 @@ async function UserNav() {
   return (
     <div className="flex items-center gap-3 text-sm">
       {me?.role === "super" && <Link href="/team" className="font-medium text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100">Team</Link>}
-      {me && <span className="hidden text-zinc-500 sm:inline">{me.username} · {me.role === "super" ? "Super admin" : "Manager"}</span>}
+      {me && <Link href="/account" className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"><span className="hidden sm:inline">{me.username} · {me.role === "super" ? "Super admin" : "Manager"}</span><span className="sm:hidden">Account</span></Link>}
       <form action={logout}>
         <SubmitButton>Sign out</SubmitButton>
       </form>

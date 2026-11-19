@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, type BackupScope, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, updateConnector, userCommand } from "@/lib/hub";
+import { backup, type BackupScope, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, siteSetting, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -71,6 +71,18 @@ export async function setHubPassword(form: FormData) {
   redirect("/team?saved=1");
 }
 
+export async function changeOwnPassword(form: FormData) {
+  const me = await currentUser();
+  const fail = (msg: string) => redirect(`/account?error=${encodeURIComponent(msg)}`);
+  if (!me || me.username === ROOT_USERNAME) fail("The built-in admin password is the ADMIN_PASSWORD secret; change it in Cloudflare.");
+  const password = String(form.get("password") ?? "");
+  if (!(await authenticate(env(), me!.username, String(form.get("current") ?? "")))) fail("Current password is wrong.");
+  if (password.length < 10) fail("New password must be at least 10 characters.");
+  if (password !== String(form.get("confirm") ?? "")) fail("The two new passwords don’t match.");
+  await env().DB.prepare("UPDATE users SET pw = ? WHERE id = ?").bind(await hashPassword(password), me!.id).run();
+  redirect("/account?saved=1");
+}
+
 async function siteFrom(form: FormData) {
   const site = await getSite(env(), String(form.get("id")));
   if (!site) throw new Error("Site not found");
@@ -111,6 +123,14 @@ export async function saveAllowedAdmins(form: FormData) {
   await env().DB.prepare("UPDATE sites SET allowed_admins = ? WHERE id = ?")
     .bind(String(form.get("allowed_admins") ?? "").trim(), site.id)
     .run();
+  refresh();
+}
+
+export async function toggleSetting(form: FormData) {
+  const site = await siteFrom(form);
+  const setting = String(form.get("setting"));
+  if (setting !== "debug" && setting !== "maintenance") throw new Error("Unknown setting");
+  await siteSetting(env(), site, setting, form.get("on") === "1");
   refresh();
 }
 

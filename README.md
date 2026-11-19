@@ -9,6 +9,7 @@ Next.js dashboard on Cloudflare Workers (OpenNext + D1 + Cron) that manages many
 | Daily admin account check | Plugin lists administrators; hub flags more than `MAX_ADMINS` or anyone not in the site's allowed list |
 | Daily backup to Google Drive | Plugin zips files + DB dump and uploads it to a Drive folder via a one-off upload URL from the hub (sites never hold Google credentials) |
 | Manual backups | Database + files, database only, or files only (updates always take a full backup) |
+| Debug / maintenance mode | Toggle from the site page. Debug sets `WP_DEBUG` + `WP_DEBUG_LOG` in wp-config.php (errors go to `wp-content/debug.log`, never shown to visitors); maintenance shows visitors a 503 page while logged-in admins see the site |
 | Daily updates with rollback | After the backup, plugin updates core/plugins/themes, loads the home page and login page, and restores the backup automatically if either fails |
 | Manual rollback / remote restore | Site page → Backups → Restore (backups taken before updates are marked "pre-update") |
 
@@ -48,4 +49,4 @@ Create `.dev.vars` with `ADMIN_PASSWORD=...` and the three `GDRIVE_*` secrets, t
 
 Sign in as `admin` with the `ADMIN_PASSWORD` secret (built-in super admin, always works). Super admins add people under **Team**:
 *Manager* runs everything on the WordPress sites; *Super admin* can also add/remove hub users and set their passwords.
-Passwords are stored as salted PBKDF2 hashes in D1. Changing `ADMIN_PASSWORD` signs everyone out; removing a user signs them out immediately.
+Everyone can change their own password by clicking their name in the header. Passwords are stored as salted PBKDF2 hashes in D1. Changing `ADMIN_PASSWORD` signs everyone out; removing a user signs them out immediately.

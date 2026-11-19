@@ -3,7 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { manageUser, restoreBackup, runCommand, saveAllowedAdmins } from "@/app/actions";
+import { manageUser, restoreBackup, runCommand, saveAllowedAdmins, toggleSetting } from "@/app/actions";
 import { SubmitButton } from "@/app/buttons";
 import { ago, Badge, Card, host, inputClass, Shell, Skeleton } from "@/app/ui";
 import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, siteBackups, siteReports } from "@/lib/hub";
@@ -133,6 +133,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                     : r.type === "scan" ? `${d.findings.length} findings`
                     : r.type === "backup" ? `${(d.size / 1e6).toFixed(1)} MB uploaded${scopeLabel[d.scope] ? ` (${scopeLabel[d.scope]})` : ""}`
                     : r.type === "connector" ? `Connector updated to ${d.version}`
+                    : r.type === "settings" ? Object.entries(d).map(([k, v]) => `${k === "debug" ? "Debug mode" : "Maintenance mode"} ${v ? "on" : "off"}`).join(", ")
                     : r.type === "user" ? (d.action === "add" ? `Added ${d.login} as ${d.role}` : `Deleted ${d.login}`) : "";
                   return (
                     <li key={r.id} className="flex gap-3 text-sm">
@@ -165,7 +166,9 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                   ["Last backup", backups[0] ? ago(backups[0].created_at) : <Badge tone="warn">never</Badge>],
                   ["HTTPS", info.https ? "Yes" : <Badge tone="bad">No</Badge>],
                   ["Search engines", info.indexing ? "Allowed" : <Badge tone="warn">Discouraged</Badge>],
-                  ["Debug mode", info.debug ? <Badge tone="warn">On</Badge> : "Off"],
+                  ["Maintenance", info.maintenance === undefined ? "–" : <Toggle siteId={site.id} setting="maintenance" on={info.maintenance}
+                    confirm={info.maintenance ? undefined : "Put the site in maintenance mode? Visitors see a “back soon” page; logged-in admins still see the site."} />],
+                  ["Debug mode", info.maintenance === undefined ? (info.debug ? <Badge tone="warn">On</Badge> : "Off") : <Toggle siteId={site.id} setting="debug" on={info.debug} />],
                   ["Server", info.server || "unknown"],
                 ] as [string, React.ReactNode][]).map(([k, v]) => (
                   <div key={k} className="contents">
@@ -289,5 +292,18 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
       </div>
     </>
+  );
+}
+
+// on/off switch for a site setting; only rendered for connector 0.5.0+ (which reports info.maintenance)
+function Toggle({ siteId, setting, on, confirm }: { siteId: string; setting: "debug" | "maintenance"; on: boolean; confirm?: string }) {
+  return (
+    <form action={toggleSetting} className="inline-flex items-center justify-end gap-2">
+      <input type="hidden" name="id" value={siteId} />
+      <input type="hidden" name="setting" value={setting} />
+      <input type="hidden" name="on" value={on ? "0" : "1"} />
+      {on ? <Badge tone="warn">On</Badge> : <span>Off</span>}
+      <SubmitButton confirm={confirm}>Turn {on ? "off" : "on"}</SubmitButton>
+    </form>
   );
 }

@@ -77,3 +77,30 @@ test("PLUGIN_VERSION matches the plugin header (bump both together)", () => {
   const php = readFileSync(new URL("../wp-plugin/wp-control-hub/wp-control-hub.php", import.meta.url), "utf8");
   assert.equal(php.match(/^ \* Version: (.+)$/m)?.[1].trim(), PLUGIN_VERSION);
 });
+
+test("plugin edits wp-config.php debug defines safely", () => {
+  // runs the plugin's real wpch_config_set() on sample configs, then php -l's each result
+  const harness = `
+    $src = file_get_contents($argv[1]);
+    preg_match('/function wpch_config_set.*?\\n}\\n/s', $src, $m);
+    function wp_generate_password($n) { return 'tmp'; }
+    eval($m[0]);
+    function wpch_config_path() { return $GLOBALS['f']; }
+    $samples = [
+      "<?php\\ndefine( 'DB_NAME', 'x' );\\ndefine('WP_DEBUG', false);\\n/* That's all, stop editing! */\\nrequire_once ABSPATH . 'wp-settings.php';\\n",
+      "<?php\\nif ( ! defined( \\"WP_DEBUG\\" ) ) {\\n\\tdefine( \\"WP_DEBUG\\", true );\\n}\\nrequire_once(ABSPATH . 'wp-settings.php');\\n",
+      "<?php\\ndefine('DB_NAME', 'x');\\nrequire_once ABSPATH . 'wp-settings.php';\\n",
+    ];
+    foreach ($samples as $i => $s) {
+      $GLOBALS['f'] = tempnam(sys_get_temp_dir(), 'cfg'); file_put_contents($GLOBALS['f'], $s);
+      wpch_config_set(['WP_DEBUG' => true, 'WP_DEBUG_LOG' => true, 'WP_DEBUG_DISPLAY' => false]);
+      $out = file_get_contents($GLOBALS['f']);
+      exec('php -l ' . escapeshellarg($GLOBALS['f']), $o, $rc);
+      echo json_encode(['rc' => $rc, 'debug' => substr_count($out, "define( 'WP_DEBUG', true );"), 'display' => substr_count($out, "define( 'WP_DEBUG_DISPLAY', false );"), 'db' => substr_count($out, 'DB_NAME'), 'beforeSettings' => strpos($out, "WP_DEBUG_LOG") < strpos($out, 'wp-settings.php')]), "\\n";
+      unlink($GLOBALS['f']);
+    }`;
+  const plugin = new URL("../wp-plugin/wp-control-hub/wp-control-hub.php", import.meta.url).pathname;
+  const lines = execFileSync("php", ["-r", harness, plugin]).toString().trim().split("\n").map((l) => JSON.parse(l));
+  for (const r of lines) assert.deepEqual(r, { rc: 0, debug: 1, display: 1, db: r.db, beforeSettings: true });
+  assert.equal(lines.length, 3);
+});
