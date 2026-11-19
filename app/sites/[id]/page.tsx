@@ -8,11 +8,11 @@ import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
 import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, siteReports } from "@/lib/hub";
 
-export default function SitePage({ params }: PageProps<"/sites/[id]">) {
+export default function SitePage({ params, searchParams }: PageProps<"/sites/[id]">) {
   return (
     <Shell>
       <Suspense fallback={<Skeleton rows={5} />}>
-        <SiteDetail params={params} />
+        <SiteDetail params={params} searchParams={searchParams} />
       </Suspense>
     </Shell>
   );
@@ -21,9 +21,11 @@ export default function SitePage({ params }: PageProps<"/sites/[id]">) {
 const muted = "text-sm text-zinc-500";
 const scopeLabel: Record<string, string> = { db: "database only", files: "files only" };
 const DAY = 86_400_000;
+// ?error=<code>; fixed texts so a crafted link can't put its own words on the page
+const ERRORS: Record<string, string> = { move: "That move wasn’t allowed: you can only move sites between your own organizations." };
 
-async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+async function SiteDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: PageProps<"/sites/[id]">["searchParams"] }) {
+  const [{ id }, { error }] = await Promise.all([params, searchParams]);
   const env = getCloudflareContext().env as Env;
   const [site, me] = await Promise.all([getSite(env, id), currentUser()]);
   if (!site || !canSee(me, site)) notFound();
@@ -232,6 +234,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
 
         <div className="space-y-6">
+          {typeof error === "string" && Object.hasOwn(ERRORS, error) && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-500/10 dark:text-red-400">{ERRORS[error]}</p>}
           {canMove && (
             <Card title="Organization">
               <form action={setSiteOrg} className="flex gap-2">
