@@ -5,7 +5,7 @@ export type Report = { id: number; site_id: string; type: string; ok: number; da
 
 export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector", "user", "settings"];
 // connector plugin version this hub serves at /wp-control-hub.zip; must match the plugin header (checked in hub.test.ts)
-export const PLUGIN_VERSION = "0.5.1";
+export const PLUGIN_VERSION = "0.5.2";
 export type BackupScope = "both" | "db" | "files";
 const enc = new TextEncoder();
 
@@ -167,9 +167,12 @@ export async function updateConnector(env: Env, site: Site) {
 }
 
 // add: WordPress emails the new user a set-password link, so no password passes through the hub
-export async function siteSetting(env: Env, site: Site, setting: "debug" | "maintenance", on: boolean) {
+export const SETTINGS = { maintenance: "Maintenance mode", debug: "Debug mode", debug_log: "Debug log" } as const;
+export type Setting = keyof typeof SETTINGS;
+
+export async function siteSetting(env: Env, site: Site, setting: Setting, on: boolean) {
   if (await sendCommand(env, site, "settings", { [setting]: on }))
-    await insertReport(env, site.id, "queued", true, { job: `Turning ${setting === "debug" ? "debug mode" : "maintenance mode"} ${on ? "on" : "off"}` });
+    await insertReport(env, site.id, "queued", true, { job: `Turning ${SETTINGS[setting].toLowerCase()} ${on ? "on" : "off"}` });
 }
 
 export async function userCommand(env: Env, site: Site, args: { action: "add"; login: string; email: string; role: string } | { action: "delete"; login: string }) {

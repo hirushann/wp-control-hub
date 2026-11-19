@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, type BackupScope, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, siteSetting, updateConnector, userCommand } from "@/lib/hub";
+import { backup, type BackupScope, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, sendCommand, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -129,8 +129,8 @@ export async function saveAllowedAdmins(form: FormData) {
 export async function toggleSetting(form: FormData) {
   const site = await siteFrom(form);
   const setting = String(form.get("setting"));
-  if (setting !== "debug" && setting !== "maintenance") throw new Error("Unknown setting");
-  await siteSetting(env(), site, setting, form.get("on") === "1");
+  if (!Object.hasOwn(SETTINGS, setting)) throw new Error("Unknown setting");
+  await siteSetting(env(), site, setting as Setting, form.get("on") === "1");
   refresh();
 }
 

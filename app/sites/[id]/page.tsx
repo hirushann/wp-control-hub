@@ -4,9 +4,9 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { manageUser, restoreBackup, runCommand, saveAllowedAdmins, toggleSetting } from "@/app/actions";
-import { SubmitButton } from "@/app/buttons";
+import { BackupDialog, SubmitButton } from "@/app/buttons";
 import { ago, Badge, Card, host, inputClass, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, siteBackups, siteReports } from "@/lib/hub";
+import { adminIssues, connectionKey, type Env, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteBackups, siteReports } from "@/lib/hub";
 
 export default function SitePage({ params }: PageProps<"/sites/[id]">) {
   return (
@@ -57,24 +57,21 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
             {statusData && <> · WordPress {statusData.wp} · PHP {statusData.php}</>}
           </p>
         </div>
-        <form action={runCommand} className="flex flex-wrap gap-2">
-          <input type="hidden" name="id" value={site.id} />
-          <SubmitButton name="cmd" value="status">Check users &amp; updates</SubmitButton>
-          <SubmitButton name="cmd" value="scan">Scan for malware</SubmitButton>
-          <span className="flex gap-1">
-            <label htmlFor="scope" className="sr-only">What to back up</label>
-            <select id="scope" name="scope" defaultValue="both"
-              className="rounded-lg border border-zinc-300 bg-white px-2 text-sm dark:border-zinc-700 dark:bg-zinc-900">
-              <option value="both">Database + files</option>
-              <option value="db">Database only</option>
-              <option value="files">Files only</option>
-            </select>
-            <SubmitButton name="cmd" value="backup">Back up now</SubmitButton>
-          </span>
-          <SubmitButton name="cmd" value="update" variant="primary" confirm="Back up, then install all updates? It rolls back automatically if the site breaks.">
-            Back up &amp; update
-          </SubmitButton>
-        </form>
+        <div className="flex flex-wrap items-center gap-2">
+          <form action={runCommand} className="contents">
+            <input type="hidden" name="id" value={site.id} />
+            <SubmitButton name="cmd" value="status">Check for updates</SubmitButton>
+            <SubmitButton name="cmd" value="scan">Scan for malware</SubmitButton>
+          </form>
+          <span aria-hidden className="mx-1 hidden h-6 w-px bg-zinc-200 sm:block dark:bg-zinc-800" />
+          <BackupDialog siteId={site.id} action={runCommand} />
+          <form action={runCommand}>
+            <input type="hidden" name="id" value={site.id} />
+            <SubmitButton name="cmd" value="update" variant="primary" confirm="Back up, then install all updates? It rolls back automatically if the site breaks.">
+              Back up &amp; update all
+            </SubmitButton>
+          </form>
+        </div>
       </div>
 
       {running && (
@@ -134,7 +131,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                     : r.type === "scan" ? `${d.findings.length} findings`
                     : r.type === "backup" ? `${(d.size / 1e6).toFixed(1)} MB uploaded${scopeLabel[d.scope] ? ` (${scopeLabel[d.scope]})` : ""}`
                     : r.type === "connector" ? `Connector updated to ${d.version}`
-                    : r.type === "settings" ? Object.entries(d).map(([k, v]) => `${k === "debug" ? "Debug mode" : "Maintenance mode"} ${v ? "on" : "off"}`).join(", ")
+                    : r.type === "settings" ? Object.entries(d).map(([k, v]) => `${SETTINGS[k as Setting] ?? k} ${v ? "on" : "off"}`).join(", ")
                     : r.type === "user" ? (d.action === "add" ? `Added ${d.login} as ${d.role}` : `Deleted ${d.login}`) : "";
                   return (
                     <li key={r.id} className="flex gap-3 text-sm">
@@ -147,13 +144,13 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                   );
                 })}
               </ol>
-            ) : <p className={muted}>Nothing yet. Connect the plugin, then run “Check users &amp; updates”.</p>}
+            ) : <p className={muted}>Nothing yet. Connect the plugin, then run “Check for updates”.</p>}
           </Card>
         </div>
 
         <div className="space-y-6">
           <Card title="Site overview">
-            {!info ? <p className={muted}>{statusData ? "Install connector 0.3.0 and run “Check users & updates” to see details." : "Unknown until the first check."}</p> : (
+            {!info ? <p className={muted}>{statusData ? "Install connector 0.3.0 and run “Check for updates” to see details." : "Unknown until the first check."}</p> : (
               <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
                 {([
                   ["Site name", info.name],
@@ -170,6 +167,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
                   ["Maintenance", info.maintenance === undefined ? "–" : <Toggle siteId={site.id} setting="maintenance" on={info.maintenance}
                     confirm={info.maintenance ? undefined : "Put the site in maintenance mode? Visitors see a “back soon” page; logged-in admins still see the site."} />],
                   ["Debug mode", info.maintenance === undefined ? (info.debug ? <Badge tone="warn">On</Badge> : "Off") : <Toggle siteId={site.id} setting="debug" on={info.debug} />],
+                  ["Debug log", info.debug_log === undefined ? "–" : <Toggle siteId={site.id} setting="debug_log" on={info.debug_log} />],
                   ["Server", info.server || "unknown"],
                 ] as [string, React.ReactNode][]).map(([k, v]) => (
                   <div key={k} className="contents">
@@ -297,7 +295,7 @@ async function SiteDetail({ params }: { params: Promise<{ id: string }> }) {
 }
 
 // on/off switch for a site setting; only rendered for connector 0.5.0+ (which reports info.maintenance)
-function Toggle({ siteId, setting, on, confirm }: { siteId: string; setting: "debug" | "maintenance"; on: boolean; confirm?: string }) {
+function Toggle({ siteId, setting, on, confirm }: { siteId: string; setting: Setting; on: boolean; confirm?: string }) {
   return (
     <form action={toggleSetting} className="inline-flex items-center justify-end gap-2">
       <input type="hidden" name="id" value={siteId} />

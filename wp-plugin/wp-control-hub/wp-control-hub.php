@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.5.1
+ * Version: 0.5.2
  * Requires PHP: 7.4
  */
 
@@ -264,6 +264,7 @@ function wpch_status() {
 		'https'          => strpos(home_url(), 'https://') === 0,
 		'indexing'       => (bool) get_option('blog_public'),
 		'debug'          => defined('WP_DEBUG') && WP_DEBUG,
+		'debug_log'      => defined('WP_DEBUG_LOG') && WP_DEBUG_LOG,
 		'maintenance'    => (bool) get_option('wpch_maintenance'),
 		'memory_limit'   => ini_get('memory_limit'),
 		'server'         => $_SERVER['SERVER_SOFTWARE'] ?? '',
@@ -610,17 +611,19 @@ function wpch_user($args) {
 
 /* ---------- Site settings: debug mode (wp-config.php) and maintenance mode ---------- */
 
+// args: maintenance / debug / debug_log => bool
 function wpch_settings($args) {
-	$debug = null;
-	if (isset($args['maintenance'])) update_option('wpch_maintenance', $args['maintenance'] ? 1 : 0);
-	if (isset($args['debug'])) {
-		$debug = (bool) $args['debug'];
-		// errors go to wp-content/debug.log, never shown to visitors
-		wpch_config_set(['WP_DEBUG' => $debug, 'WP_DEBUG_LOG' => $debug, 'WP_DEBUG_DISPLAY' => false]);
-	}
-	wpch_report('settings', true, array_filter(['maintenance' => $args['maintenance'] ?? null, 'debug' => $debug], 'is_bool'));
+	$set = [];
+	foreach (['maintenance', 'debug', 'debug_log'] as $k) if (isset($args[$k])) $set[$k] = (bool) $args[$k];
+	if (isset($set['maintenance'])) update_option('wpch_maintenance', $set['maintenance'] ? 1 : 0);
+	$config = [];
+	// debug output never goes on the page for visitors; errors only reach wp-content/debug.log when the log is on
+	if (isset($set['debug'])) $config += ['WP_DEBUG' => $set['debug'], 'WP_DEBUG_DISPLAY' => false];
+	if (isset($set['debug_log'])) $config['WP_DEBUG_LOG'] = $set['debug_log'];
+	if ($config) wpch_config_set($config);
+	wpch_report('settings', true, $set);
 	$status = wpch_status();
-	if ($debug !== null) $status['info']['debug'] = $debug; // WP_DEBUG constant in memory is still the old value
+	foreach (['debug', 'debug_log'] as $k) if (isset($set[$k])) $status['info'][$k] = $set[$k]; // constants in memory are still the old values
 	wpch_report('status', true, $status);
 }
 
