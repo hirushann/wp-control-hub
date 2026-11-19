@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.5.2
+ * Version: 0.5.3
  * Requires PHP: 7.4
  */
 
@@ -221,6 +221,12 @@ function wpch_admin_includes() {
 	}
 }
 
+// premium = the update isn't served by wordpress.org (licensed vendor). These install only when someone ticks them in the hub.
+function wpch_premium($u) {
+	$u = (array) $u;
+	return strpos((string) ($u['id'] ?? ''), 'w.org/') !== 0 && strpos((string) ($u['url'] ?? ''), '//wordpress.org/') === false;
+}
+
 function wpch_status() {
 	wpch_admin_includes();
 	wp_clean_update_cache(); // force fresh checks instead of the 12h cached ones
@@ -231,10 +237,10 @@ function wpch_status() {
 	$updates = [];
 	// id = what the hub sends back in args.only to pick items
 	foreach (get_plugin_updates() as $file => $p) {
-		$updates[] = ['id' => $file, 'type' => 'plugin', 'name' => $p->Name, 'from' => $p->Version, 'to' => $p->update->new_version];
+		$updates[] = ['id' => $file, 'type' => 'plugin', 'name' => $p->Name, 'from' => $p->Version, 'to' => $p->update->new_version, 'premium' => wpch_premium($p->update)];
 	}
 	foreach (get_theme_updates() as $slug => $t) {
-		$updates[] = ['id' => $slug, 'type' => 'theme', 'name' => $t->get('Name'), 'from' => $t->get('Version'), 'to' => $t->update['new_version']];
+		$updates[] = ['id' => $slug, 'type' => 'theme', 'name' => $t->get('Name'), 'from' => $t->get('Version'), 'to' => $t->update['new_version'], 'premium' => wpch_premium($t->update)];
 	}
 	$core = get_core_updates();
 	if ($core && $core[0]->response === 'upgrade') {
@@ -518,8 +524,10 @@ function wpch_last_error($skin) {
 
 function wpch_backup($args) {
 	$only = isset($args['only']) ? array_map('strval', (array) $args['only']) : null;
-	$ids  = array_column(wpch_status()['updates'], 'id');
-	$will_update = !empty($args['update']) && ($only === null ? $ids : array_intersect($ids, $only));
+	$updates = wpch_status()['updates'];
+	// nightly / "update everything" runs leave premium updates alone
+	if ($only === null) $only = array_column(array_filter($updates, fn($u) => empty($u['premium'])), 'id');
+	$will_update = !empty($args['update']) && array_intersect(array_column($updates, 'id'), $only);
 	// rollback after an update needs both database and files
 	$scope = $will_update ? 'both' : (in_array($args['scope'] ?? '', ['db', 'files'], true) ? $args['scope'] : 'both');
 	$zip = wpch_make_backup($scope);

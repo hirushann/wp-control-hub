@@ -6,7 +6,7 @@ export type Report = { id: number; site_id: string; type: string; ok: number; da
 
 export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector", "user", "settings"];
 // connector plugin version this hub serves at /wp-control-hub.zip; must match the plugin header (checked in hub.test.ts)
-export const PLUGIN_VERSION = "0.5.2";
+export const PLUGIN_VERSION = "0.5.3";
 export type BackupScope = "both" | "db" | "files";
 const enc = new TextEncoder();
 
@@ -331,7 +331,7 @@ export function summarize(reports: Report[]) {
 // What needs a human on one site, most serious first; tone = worst of them. Shared by the dashboard and site page.
 export function siteAttention(a: {
   info?: { https?: boolean; indexing?: boolean; maintenance?: boolean; debug?: boolean };
-  findings: number; pending: number; adminWarnings: number; lastBackupAt?: number; failedJobs?: number; now: number;
+  findings: number; pending: number; adminWarnings: number; lastBackupAt?: number; failedJobs?: number; failedUpdates?: number; now: number;
 }) {
   const bad = [
     a.findings && `${a.findings} suspicious file${a.findings > 1 ? "s" : ""}`,
@@ -341,6 +341,7 @@ export function siteAttention(a: {
   const warn = [
     (a.lastBackupAt ? a.now - a.lastBackupAt > 2 * 86_400_000 && "No backup in 2 days" : "Never backed up"),
     a.adminWarnings && `${a.adminWarnings} admin account warning${a.adminWarnings > 1 ? "s" : ""}`,
+    a.failedUpdates && `${a.failedUpdates} update${a.failedUpdates > 1 ? "s" : ""} failed`,
     a.pending && `${a.pending} update${a.pending > 1 ? "s" : ""} pending`,
     a.info?.maintenance && "Maintenance mode is on",
     a.info?.debug && "Debug mode is on",

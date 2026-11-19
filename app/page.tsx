@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { addSite, currentUser, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
 import { ago, Badge, Card, host, Icon, inputClass, Kpi, Shell, Skeleton, type Tone } from "./ui";
-import { adminIssues, canSee, isRestricted, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
+import { adminIssues, canSee, isRestricted, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -98,8 +98,12 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
     // a job whose latest run failed (an older failure fixed by a later success doesn't count)
     const failedJobs = ["status", "scan", "update", "backup", "restore", "connector"].filter((t) => r(t) && !r(t)!.ok).length;
     const lastBackupAt = backups.get(s.id);
-    const attention = siteAttention({ info: st?.info, findings, pending, adminWarnings: issues.length, lastBackupAt, failedJobs, now });
-    return { s, st, scan, status, findings, pending, lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined, org: s.org_id ? orgNames.get(s.org_id) : undefined };
+    // still-pending updates whose latest attempt failed
+    const lastUpdate = r("update");
+    const fails = updateFailures(lastUpdate ? [lastUpdate] : []);
+    const failedUpdates = (st?.updates ?? []).filter((u: { id?: string }) => u.id && fails.has(u.id)).length;
+    const attention = siteAttention({ info: st?.info, findings, pending, adminWarnings: issues.length, lastBackupAt, failedJobs, failedUpdates, now });
+    return { s, st, scan, status, findings, pending, failedUpdates, lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined, org: s.org_id ? orgNames.get(s.org_id) : undefined };
   });
   // connector updates apply to every site, whatever the filter
   const outdated = allRows.filter((x) => !!x.connector && x.connector !== PLUGIN_VERSION).length;
@@ -110,6 +114,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
   const healthy = count((x) => x.attention.tone === "ok");
   const malware = count((x) => x.findings > 0);
   const pendingTotal = rows.reduce((n, x) => n + x.pending, 0);
+  const failedTotal = rows.reduce((n, x) => n + x.failedUpdates, 0);
   const backedUp = count((x) => !!x.lastBackupAt && now - x.lastBackupAt < 2 * 86_400_000);
   // worst first, then by name
   const order = { bad: 0, warn: 1, ok: 2 };
@@ -137,7 +142,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi icon="globe" label="Sites" tone={healthy === rows.length ? "ok" : "muted"} value={rows.length} sub={`${healthy} healthy · ${rows.length - healthy} to review`} />
         <Kpi icon="shield" label="Malware alerts" tone={malware ? "bad" : "ok"} value={malware ? `${malware} site${malware > 1 ? "s" : ""}` : "None"} sub={malware ? "Suspicious files found" : "All recent scans clean"} />
-        <Kpi icon="refresh" label="Pending updates" tone={pendingTotal ? "warn" : "ok"} value={pendingTotal} sub={pendingTotal ? `Across ${count((x) => x.pending > 0)} site${count((x) => x.pending > 0) === 1 ? "" : "s"}` : "Everything current"} />
+        <Kpi icon="refresh" label="Pending updates" tone={pendingTotal ? "warn" : "ok"} value={pendingTotal} sub={failedTotal ? `${failedTotal} failed last time` : pendingTotal ? `Across ${count((x) => x.pending > 0)} site${count((x) => x.pending > 0) === 1 ? "" : "s"}` : "Everything current"} />
         <Kpi icon="archive" label="Backed up in 48h" tone={backedUp === rows.length ? "ok" : "warn"} value={`${backedUp} / ${rows.length}`} sub={backedUp === rows.length ? "All sites covered" : `${rows.length - backedUp} need a backup`} />
       </div>
 
@@ -165,7 +170,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
                 {showOrg && <td className="px-5 py-3.5 text-zinc-600 dark:text-zinc-400">{x.org ?? <Muted>–</Muted>}</td>}
                 <td className="px-5 py-3.5"><HealthBadge tone={x.attention.tone} items={x.attention.items} /></td>
                 <td className="px-5 py-3.5">{!x.scan ? <Muted>Not scanned</Muted> : !x.scan.ok ? <Badge tone="bad">Scan failed</Badge> : x.findings ? <Badge tone="bad">{x.findings} finding{x.findings > 1 ? "s" : ""}</Badge> : <Badge tone="ok">Clean</Badge>}</td>
-                <td className="px-5 py-3.5">{!x.st ? <Muted>Unknown</Muted> : x.pending ? <Badge tone="warn">{x.pending} pending</Badge> : <Badge tone="ok">Up to date</Badge>}</td>
+                <td className="px-5 py-3.5"><span className="flex flex-wrap gap-1.5">{!x.st ? <Muted>Unknown</Muted> : x.pending ? <Badge tone="warn">{x.pending} pending</Badge> : <Badge tone="ok">Up to date</Badge>}{x.failedUpdates > 0 && <Badge tone="bad">{x.failedUpdates} failed</Badge>}</span></td>
                 <td className="px-5 py-3.5">{x.lastBackupAt ? <span className={now - x.lastBackupAt > 2 * 86_400_000 ? "text-amber-700 dark:text-amber-400" : ""}>{ago(x.lastBackupAt)}</span> : <Muted>Never</Muted>}</td>
                 <td className="px-5 py-3.5 tabular-nums text-zinc-600 dark:text-zinc-400">{x.st?.wp ?? "–"}</td>
                 <td className="px-5 py-3.5 text-right"><ReportLink id={x.s.id} name={x.name ?? host(x.s.url)} /></td>
@@ -185,6 +190,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
                 <HealthBadge tone={x.attention.tone} items={x.attention.items} />
                 {x.findings > 0 && <Badge tone="bad">{x.findings} finding{x.findings > 1 ? "s" : ""}</Badge>}
                 {x.pending > 0 && <Badge tone="warn">{x.pending} pending</Badge>}
+                {x.failedUpdates > 0 && <Badge tone="bad">{x.failedUpdates} update{x.failedUpdates > 1 ? "s" : ""} failed</Badge>}
                 <Badge tone="muted">Backup {ago(x.lastBackupAt)}</Badge>
               </div>
               <ReportLink id={x.s.id} name={x.name ?? host(x.s.url)} />

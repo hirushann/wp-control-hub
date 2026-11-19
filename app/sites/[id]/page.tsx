@@ -42,8 +42,23 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
   const info = statusData?.info;
   const findings: { file: string; reason: string }[] = scan ? JSON.parse(scan.data).findings : [];
   const issues = adminIssues(site, status, Number(env.MAX_ADMINS));
-  const updates: { id?: string; type: string; name: string; from: string; to: string }[] = statusData?.updates ?? [];
+  const updates: { id?: string; type: string; name: string; from: string; to: string; premium?: boolean }[] = statusData?.updates ?? [];
   const failures = updateFailures(reports);
+  const regular = updates.filter((u) => !u.premium), premium = updates.filter((u) => u.premium);
+  const updateRow = (u: (typeof updates)[number], checked: boolean) => { const fail = u.id ? failures.get(u.id) : undefined; return (
+                    <li key={u.type + u.name}>
+                      <label className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
+                        <span className="flex min-w-0 items-center gap-3">
+                          {/* id comes from plugin 0.1.2+; older plugins can only update everything */}
+                          {u.id && <input type="checkbox" name="only" value={u.id} defaultChecked={checked} className="size-4 shrink-0 accent-indigo-600" />}
+                          <span className="truncate font-medium">{u.name}</span>
+                          <Badge tone="muted">{u.type}</Badge>
+                        </span>
+                        <span className="shrink-0 font-mono text-xs text-zinc-500">{u.from} → <span className="text-zinc-900 dark:text-zinc-100">{u.to}</span></span>
+                      </label>
+                      {fail && <p className="-mt-1 mb-1 px-2 pl-9 text-xs text-amber-700 dark:text-amber-400"><span className="font-medium">Last attempt failed {ago(fail.at)}:</span> {fail.reason}</p>}
+                    </li>
+  ); };
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
   // a backup was sent and the site hasn't reported back yet (backups of big sites take several minutes)
@@ -138,25 +153,17 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
               <form action={runCommand}>
                 <input type="hidden" name="id" value={site.id} />
                 <input type="hidden" name="pick" value="1" />
-                <ul className="-mx-2 text-sm">
-                  {updates.map((u) => { const fail = u.id ? failures.get(u.id) : undefined; return (
-                    <li key={u.type + u.name}>
-                      <label className="flex items-center justify-between gap-3 rounded-lg px-2 py-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/60">
-                        <span className="flex min-w-0 items-center gap-3">
-                          {/* id comes from plugin 0.1.2+; older plugins can only update everything */}
-                          {u.id && <input type="checkbox" name="only" value={u.id} defaultChecked className="size-4 shrink-0 accent-indigo-600" />}
-                          <span className="truncate font-medium">{u.name}</span>
-                          <Badge tone="muted">{u.type}</Badge>
-                        </span>
-                        <span className="shrink-0 font-mono text-xs text-zinc-500">{u.from} → <span className="text-zinc-900 dark:text-zinc-100">{u.to}</span></span>
-                      </label>
-                      {fail && <p className="-mt-1 mb-1 px-2 pl-9 text-xs text-amber-700 dark:text-amber-400"><span className="font-medium">Last attempt failed {ago(fail.at)}:</span> {fail.reason}</p>}
-                    </li>
-                  ); })}
-                </ul>
+                <ul className="-mx-2 text-sm">{regular.map((u) => updateRow(u, true))}</ul>
+                {premium.length > 0 && (
+                  <div className={regular.length ? "mt-4 border-t border-zinc-100 pt-4 dark:border-zinc-800" : ""}>
+                    <h3 className="flex items-center gap-2 text-sm font-semibold">Premium <Badge tone="muted">{premium.length}</Badge></h3>
+                    <p className="mt-1 mb-2 text-xs text-zinc-500">From paid vendors, not wordpress.org. Never installed automatically: check the license is active on the site, then tick to include.</p>
+                    <ul className="-mx-2 text-sm">{premium.map((u) => updateRow(u, false))}</ul>
+                  </div>
+                )}
                 {updates.every((u) => u.id) ? (
                   <div className="mt-4 flex items-center justify-between gap-3 border-t border-zinc-100 pt-4 dark:border-zinc-800">
-                    <p className="text-xs text-zinc-500">A full backup is taken first; the site rolls back automatically if it breaks.</p>
+                    <p className="text-xs text-zinc-500">A full backup is taken first; the site rolls back automatically if it breaks. Nightly runs install everything except premium.</p>
                     <SubmitButton name="cmd" value="update" variant="primary" confirm="Back up, then install the ticked updates? It rolls back automatically if the site breaks.">
                       Update selected
                     </SubmitButton>

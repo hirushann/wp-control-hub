@@ -10,7 +10,7 @@ Next.js dashboard on Cloudflare Workers (OpenNext + D1 + Cron) that manages many
 | Daily backup to Google Drive | Plugin zips files + DB dump and uploads it to a Drive folder via a one-off upload URL from the hub (sites never hold Google credentials) |
 | Manual backups | Database + files, database only, or files only (updates always take a full backup) |
 | Debug / maintenance mode | Toggle from the site page. Debug mode sets `WP_DEBUG` (never displayed to visitors), Debug log sets `WP_DEBUG_LOG` (writes `wp-content/debug.log` while debug mode is on), both in wp-config.php; maintenance shows visitors a 503 page while logged-in admins see the site |
-| Daily updates with rollback | After the backup, plugin updates core/plugins/themes, loads the home page and login page, and restores the backup automatically if either fails |
+| Daily updates with rollback | After the backup, plugin updates core/plugins/themes, loads the home page and login page, and restores the backup automatically if either fails. Premium (non-wordpress.org) updates are skipped unless ticked on the site page |
 | Manual rollback / remote restore | Site page → Backups → Restore (backups taken before updates are marked "pre-update") |
 
 Flow: hub sends a signed command → plugin queues it in WP-Cron and replies 202 → when done, plugin POSTs a signed report to `/api/report`.
