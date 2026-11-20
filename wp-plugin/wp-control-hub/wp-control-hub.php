@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.6.0
+ * Version: 0.6.1
  * Requires PHP: 7.4
  */
 
@@ -93,8 +93,14 @@ add_action('init', function () {
 
 function wpch_pair_request() {
 	if (!defined('WPCH_HUB') || wpch_conn()) return;
-	$nonce = bin2hex(random_bytes(16));
-	update_option('wpch_pair_nonce', ['nonce' => $nonce, 'at' => time()], false);
+	// reuse a fresh code: two requests seconds apart (cron + a visit) must not cancel the key already on its way
+	$p = get_option('wpch_pair_nonce');
+	if (is_array($p) && time() - (int) $p['at'] < 10 * MINUTE_IN_SECONDS) {
+		$nonce = (string) $p['nonce'];
+	} else {
+		$nonce = bin2hex(random_bytes(16));
+		update_option('wpch_pair_nonce', ['nonce' => $nonce, 'at' => time()], false);
+	}
 	// fire and forget: the hub answers right away and delivers the key in its own request
 	wp_remote_post(rtrim(WPCH_HUB, '/') . '/api/pair', [
 		'blocking' => false,

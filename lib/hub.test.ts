@@ -205,3 +205,38 @@ test("site addresses match across scheme, www. and trailing slash", async () => 
   assert.notEqual(siteKey("https://example.nl"), siteKey("https://example.nl.evil.com"));
   assert.equal(siteKey("not a url"), "");
 });
+
+test("connector pairing: back-to-back requests share a code; only the right code and hub are accepted", () => {
+  // the plugin's real pairing functions, with just enough WordPress stubbed (options live in an array)
+  const harness = `
+    const MINUTE_IN_SECONDS = 60, HOUR_IN_SECONDS = 3600; define('WPCH_OPT', 'wpch_connection'); define('WPCH_HUB', 'https://hub.example');
+    $O = []; $SENT = [];
+    function get_option($k) { return $GLOBALS['O'][$k] ?? false; }
+    function update_option($k, $v, $a = null) { $GLOBALS['O'][$k] = $v; }
+    function delete_option($k) { unset($GLOBALS['O'][$k]); }
+    function home_url($p = '') { return 'https://site.example' . $p; }
+    function wp_json_encode($v) { return json_encode($v); }
+    function esc_url_raw($u) { return $u; }
+    function sanitize_text_field($s) { return $s; }
+    function wp_http_validate_url($u) { return filter_var($u, FILTER_VALIDATE_URL); }
+    function untrailingslashit($s) { return rtrim($s, '/'); }
+    function wp_remote_post($url, $a) { $GLOBALS['SENT'][] = json_decode($a['body'], true)['nonce']; }
+    class WP_Error { public $data; function __construct($c, $m, $d) { $this->data = $d; } }
+    class WP_REST_Request { function __construct(public $p) {} function get_param($k) { return $this->p[$k] ?? null; } }
+    $src = file_get_contents($argv[1]);
+    foreach (['wpch_conn', 'wpch_save_key', 'wpch_pair_request', 'wpch_pair_receive'] as $fn) { preg_match('/^function ' . $fn . '\\(.*?^}$/sm', $src, $m); eval($m[0]); }
+    $key = fn($hub) => base64_encode(json_encode(['hub' => $hub, 'id' => 'a', 'secret' => 's']));
+    $try = fn($n, $k) => ($r = wpch_pair_receive(new WP_REST_Request(['nonce' => $n, 'key' => $k]))) instanceof WP_Error ? $r->data['status'] : 'ok';
+    wpch_pair_request(); wpch_pair_request();                       // cron and a visit, seconds apart
+    $out = ['same' => $SENT[0] === $SENT[1]];
+    $GLOBALS['O']['wpch_pair_nonce']['at'] -= 11 * 60; wpch_pair_request(); // an old code is replaced
+    $out['renewed'] = $SENT[2] !== $SENT[0];
+    $out['stale'] = $try($SENT[0], $key('https://hub.example'));
+    $out['wrongHub'] = $try($SENT[2], $key('https://evil.example'));
+    $out['right'] = $try($SENT[2], $key('https://hub.example/'));
+    $out['again'] = $try($SENT[2], $key('https://hub.example'));
+    echo json_encode($out);`;
+  const plugin = new URL("../wp-plugin/wp-control-hub/wp-control-hub.php", import.meta.url).pathname;
+  assert.deepEqual(JSON.parse(execFileSync("php", ["-r", harness, plugin]).toString()),
+    { same: true, renewed: true, stale: 403, wrongHub: 400, right: "ok", again: 409 });
+});
