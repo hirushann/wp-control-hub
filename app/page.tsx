@@ -2,8 +2,8 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { addSite, currentUser, setPairing, updateAllConnectors } from "./actions";
-import { SubmitButton } from "./buttons";
+import { addSite, bulkCommand, currentUser, setPairing, updateAllConnectors } from "./actions";
+import { AutoRefresh, BulkBar, SubmitButton } from "./buttons";
 import { ago, Badge, Card, fmtDate, host, Icon, inputClass, Kpi, Running, Shell, Skeleton, type Tone } from "./ui";
 import { adminIssues, canSee, isRestricted, notConnected, recentReports, runningJobs, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, pairingUntil, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
@@ -47,7 +47,8 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
     </>
   );
   const notice = typeof sp.added === "string" ? `Added ${sp.added} site${sp.added === "1" ? "" : "s"}${Number(sp.skipped) ? `, skipped ${sp.skipped} (already in the hub or not a valid address)` : ""}.`
-    : sp.removed ? "Site removed from the hub." : null;
+    : sp.removed ? "Site removed from the hub."
+    : typeof sp.bulk === "string" && BULK[sp.bulk] ? `${BULK[sp.bulk]} sent to ${Number(sp.n) || 0} site${sp.n === "1" ? "" : "s"}. Each one shows “Running…” until it reports back.` : null;
 
   const toolbar = (
     <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-center xl:justify-between">
@@ -137,7 +138,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
 
   return (
     <>
-    {rows.some((x) => x.running.length) && <meta httpEquiv="refresh" content="10" />}
+    {rows.some((x) => x.running.length) && <AutoRefresh />}
     {toolbar}
     <div className="space-y-6">
       {(count((x) => x.unconnected) > 0 || pairingOpen) && (
@@ -179,9 +180,9 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
       </div>
 
       <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-3.5 dark:border-zinc-800">
+        <div className="flex flex-col gap-3 border-b border-zinc-100 px-5 py-3.5 lg:flex-row lg:items-center lg:justify-between dark:border-zinc-800">
           <h2 className="text-[15px] font-semibold tracking-tight">{restricted && !tabs ? orgs[0]?.name : !orgFilter ? "All sites" : orgFilter === "none" ? "Sites without an organization" : orgNames.get(orgFilter)}</h2>
-          <span className="text-xs text-zinc-500">{rows.length} site{rows.length === 1 ? "" : "s"}</span>
+          <BulkBar action={bulkCommand} org={orgFilter} total={rows.filter((x) => !x.unconnected).length} />
         </div>
 
         {/* table on wide screens */}
@@ -189,6 +190,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
         <table className="w-full whitespace-nowrap text-left text-sm">
           <thead className="bg-zinc-50/70 text-xs text-zinc-500 dark:bg-zinc-800/40">
             <tr>
+              <th className="w-10 py-2.5 pl-5"><span className="sr-only">Select</span></th>
               {["Site", ...(showOrg ? ["Organization"] : []), "Health", "Security", "Updates", "Last backup", "WordPress"].map((h) => <th key={h} className="px-5 py-2.5 font-medium">{h}</th>)}
               <th className="px-5 py-2.5"><span className="sr-only">Actions</span></th>
             </tr>
@@ -196,6 +198,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {rows.map((x) => (
               <tr key={x.s.id} className="group relative hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+                <td className="py-3.5 pl-5"><SiteCheck x={x} /></td>
                 <td className="px-5 py-3.5">
                   <SiteName x={x} />
                   {x.running.length > 0 && <div className="mt-2"><RunningJobs jobs={x.running} /></div>}
@@ -218,7 +221,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
         <ul className="divide-y divide-zinc-100 md:hidden dark:divide-zinc-800">
           {rows.map((x) => (
             <li key={x.s.id} className="relative space-y-3 px-5 py-4">
-              <SiteName x={x} />
+              <div className="flex items-center gap-3"><SiteCheck x={x} /><SiteName x={x} /></div>
               <div className="flex flex-wrap gap-2">
                 {showOrg && x.org && <Badge tone="muted">{x.org}</Badge>}
                 <HealthBadge tone={x.attention.tone} items={x.attention.items} />
@@ -275,4 +278,14 @@ function RunningJobs({ jobs }: { jobs: { job: string }[] }) {
   if (!jobs.length) return null;
   // short so the table doesn't widen; names on hover and on the site page
   return <span title={jobs.map((j) => j.job).join(", ")}><Running>{jobs.length > 1 ? `${jobs.length} running…` : "Running…"}<span className="sr-only">: {jobs.map((j) => j.job).join(", ")}</span></Running></span>;
+}
+
+const BULK: Record<string, string> = { status: "“Check for updates”", scan: "“Scan for malware”", connector: "Connector update" };
+
+// above the row's stretched link; unconnected sites can't take commands
+function SiteCheck({ x }: { x: { s: { id: string; url: string }; name?: string; unconnected: boolean } }) {
+  return (
+    <input type="checkbox" form="bulk" name="site" value={x.s.id} disabled={x.unconnected}
+      aria-label={`Select ${x.name ?? host(x.s.url)}`} className="relative z-10 size-4 accent-indigo-600 disabled:opacity-30" />
+  );
 }

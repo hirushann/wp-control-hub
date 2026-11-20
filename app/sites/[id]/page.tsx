@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { currentUser, deleteSite, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
-import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
+import { AutoRefresh, BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
 import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, notConnected, runningJobs, siteReports, updateFailures } from "@/lib/hub";
 
@@ -71,7 +71,7 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
 
   return (
     <>
-      {running.length > 0 && <meta httpEquiv="refresh" content="10" />}
+      {running.length > 0 && <AutoRefresh />}
       <nav className={`mb-5 ${muted}`} aria-label="Breadcrumb">
         <Link href="/" className="hover:text-zinc-900 dark:hover:text-zinc-100">Sites</Link> <span aria-hidden className="mx-1">/</span>
         {org && <><Link href={`/?org=${org.id}`} className="hover:text-zinc-900 dark:hover:text-zinc-100">{org.name}</Link> <span aria-hidden className="mx-1">/</span></>} <span className="text-zinc-700 dark:text-zinc-300">{info?.name ?? host(site.url)}</span>

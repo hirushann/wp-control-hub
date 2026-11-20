@@ -115,6 +115,8 @@ export async function sendCommand(env: Env, site: Site, cmd: string, args: Recor
       method: "POST",
       headers: { "content-type": "application/json", "x-wpch-ts": ts, "x-wpch-sig": await sign(site.secret, ts, body) },
       body,
+      // one slow site mustn't hold up a bulk send (those run in waitUntil, which has a time budget)
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) {
       await insertReport(env, site.id, cmd, false, { error: describeFailure(res.status, await res.text()) });

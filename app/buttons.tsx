@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useRef } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 
 const variants = {
@@ -99,5 +99,43 @@ export function PrintButton() {
       className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3.5 text-sm font-medium ${variants.primary}`}>
       Save as PDF
     </button>
+  );
+}
+
+// Re-renders the page every few seconds while jobs run, without a full reload: a reload used to cut off a bulk send
+// in flight and wipe ticked boxes. Paused while sites are ticked for a bulk action.
+export function AutoRefresh({ seconds = 10 }: { seconds?: number }) {
+  const router = useRouter();
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.querySelector('input[form="bulk"]:checked')) router.refresh(); }, seconds * 1000);
+    return () => clearInterval(t);
+  }, [router, seconds]);
+  return null;
+}
+
+// Dashboard bar: act on the ticked sites (checkboxes in the rows point at form="bulk"), or on all shown when none are ticked
+export function BulkBar({ action, org, total }: { action: (form: FormData) => Promise<void>; org: string; total: number }) {
+  const [picked, setPicked] = useState(0);
+  useEffect(() => {
+    const boxes = () => [...document.querySelectorAll<HTMLInputElement>('input[form="bulk"][name="site"]')];
+    // the table and the phone cards each have a box per site, so count unique sites
+    const count = () => setPicked(new Set(boxes().filter((b) => b.checked).map((b) => b.value)).size);
+    document.addEventListener("change", count);
+    return () => document.removeEventListener("change", count);
+  }, []);
+  const toggleAll = (on: boolean) => {
+    document.querySelectorAll<HTMLInputElement>('input[form="bulk"][name="site"]:not(:disabled)').forEach((b) => { b.checked = on; });
+    document.dispatchEvent(new Event("change"));
+  };
+  return (
+    <form id="bulk" action={action} className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="org" value={org} />
+      <label className="mr-1 inline-flex items-center gap-2 text-xs text-zinc-500">
+        <input type="checkbox" checked={picked > 0} onChange={(e) => toggleAll(e.target.checked)} className="size-4 accent-indigo-600" aria-label="Select all sites" />
+        {picked ? `${picked} selected` : `All ${total} connected`}
+      </label>
+      <SubmitButton name="cmd" value="status">Check for updates</SubmitButton>
+      <SubmitButton name="cmd" value="scan">Scan for malware</SubmitButton>
+    </form>
   );
 }

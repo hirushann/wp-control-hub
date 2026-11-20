@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, JOBS, PAIRING_HOURS, putSetting, queue, siteKey, type BackupScope, canSee, isRestricted, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
+import { backup, JOBS, notConnected, PAIRING_HOURS, putSetting, queue, siteKey, type BackupScope, canSee, isRestricted, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -285,11 +285,29 @@ export async function manageUser(form: FormData) {
 }
 
 // sites on 0.3.0+ that report an older connector; older plugins can't self-update
+// Bulk sends keep going after the response: before, a dashboard reload mid-request cut them off and some sites never got the command.
+const inBackground = (jobs: Promise<unknown>[]) => getCloudflareContext().ctx.waitUntil(Promise.allSettled(jobs));
+
 export async function updateAllConnectors() {
   const [sites, latest, me] = await Promise.all([getSites(env()), latestReports(env()), currentUser()]);
-  await Promise.allSettled(sites.filter((s) => canSee(me, s)).filter((s) => {
+  const targets = sites.filter((s) => canSee(me, s)).filter((s) => {
     const v = connectorVersion(latest.get(`${s.id}:status`));
     return v && v !== PLUGIN_VERSION;
-  }).map((s) => updateConnector(env(), s)));
-  refresh();
+  });
+  inBackground(targets.map((s) => updateConnector(env(), s)));
+  redirect(`/?bulk=connector&n=${targets.length}`);
+}
+
+// "Check for updates" / "Scan for malware" on the ticked sites, or on every connected site shown (org filter) when none are ticked
+export async function bulkCommand(form: FormData) {
+  const cmd = String(form.get("cmd"));
+  if (cmd !== "status" && cmd !== "scan") throw new Error("Unknown command");
+  const org = String(form.get("org") ?? "");
+  const picked = new Set(form.getAll("site").map(String));
+  const [sites, latest, me] = await Promise.all([getSites(env()), latestReports(env()), currentUser()]);
+  const targets = sites.filter((s) => canSee(me, s) && !notConnected(latest.get(`${s.id}:status`)) && (picked.size
+    ? picked.has(s.id)
+    : !org || (org === "none" ? !s.org_id : s.org_id === org)));
+  inBackground(targets.map((s) => queue(env(), s, cmd, undefined, JOBS[cmd])));
+  redirect(`/?bulk=${cmd}&n=${targets.length}${org ? `&org=${encodeURIComponent(org)}` : ""}`);
 }
