@@ -6,7 +6,7 @@ export type Report = { id: number; site_id: string; type: string; ok: number; da
 
 export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector", "user", "settings"];
 // connector plugin version this hub serves at /wp-control-hub.zip; must match the plugin header (checked in hub.test.ts)
-export const PLUGIN_VERSION = "0.6.1";
+export const PLUGIN_VERSION = "0.6.2";
 export type BackupScope = "both" | "db" | "files";
 const enc = new TextEncoder();
 

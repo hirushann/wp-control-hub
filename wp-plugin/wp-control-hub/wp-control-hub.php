@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.6.1
+ * Version: 0.6.2
  * Requires PHP: 7.4
  */
 
@@ -193,6 +193,17 @@ if (wpch_login_slug_on()) {
 }
 
 /* ---------- Hub → site: signed command, queued as a background job ---------- */
+
+// Plugins like Disable WP REST API and Force Login refuse every REST request from logged-out visitors, which includes
+// the hub. Our routes authenticate themselves (HMAC signature, or the one-time pairing code), so lift that block for them only.
+add_filter('rest_authentication_errors', 'wpch_rest_auth', PHP_INT_MAX);
+
+function wpch_rest_auth($result) {
+	$route = $GLOBALS['wp']->query_vars['rest_route'] ?? ($_GET['rest_route'] ?? '');
+	// pretty permalinks: /wp-json/wpch/v1/...
+	if ($route === '' && preg_match('#/wp-json(/.*)$#', (string) parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), $m)) $route = $m[1];
+	return strpos('/' . ltrim((string) $route, '/'), '/wpch/v1/') === 0 ? null : $result;
+}
 
 add_action('rest_api_init', function () {
 	register_rest_route('wpch/v1', '/pair', [

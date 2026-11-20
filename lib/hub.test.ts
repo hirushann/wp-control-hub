@@ -240,3 +240,23 @@ test("connector pairing: back-to-back requests share a code; only the right code
   assert.deepEqual(JSON.parse(execFileSync("php", ["-r", harness, plugin]).toString()),
     { same: true, renewed: true, stale: 403, wrongHub: 400, right: "ok", again: 409 });
 });
+
+test("connector lifts other plugins' REST blocks for its own routes only", () => {
+  const harness = `
+    $src = file_get_contents($argv[1]);
+    preg_match('/^function wpch_rest_auth\\(.*?^}$/sm', $src, $m); eval($m[0]);
+    $blocked = 'blocked'; // what Disable WP REST API / Force Login return
+    $case = function ($qv, $get, $uri) use ($blocked) { $GLOBALS['wp'] = (object) ['query_vars' => $qv]; $_GET = $get; $_SERVER['REQUEST_URI'] = $uri; return wpch_rest_auth($blocked) ?? 'allowed'; };
+    echo json_encode([
+      'queryVar' => $case(['rest_route' => '/wpch/v1/command'], [], '/'),
+      'getParam' => $case([], ['rest_route' => '/wpch/v1/pair'], '/?rest_route=/wpch/v1/pair'),
+      'pretty'   => $case([], [], '/wp-json/wpch/v1/command'),
+      'subdir'   => $case([], [], '/blog/wp-json/wpch/v1/pair'),
+      'other'    => $case(['rest_route' => '/wp/v2/users'], [], '/'),
+      'lookalike'=> $case(['rest_route' => '/evil/wpch/v1/x'], [], '/'),
+      'prefix'   => $case(['rest_route' => '/wpch/v10/x'], [], '/'),
+    ]);`;
+  const plugin = new URL("../wp-plugin/wp-control-hub/wp-control-hub.php", import.meta.url).pathname;
+  assert.deepEqual(JSON.parse(execFileSync("php", ["-r", harness, plugin]).toString()),
+    { queryVar: "allowed", getParam: "allowed", pretty: "allowed", subdir: "allowed", other: "blocked", lookalike: "blocked", prefix: "blocked" });
+});
