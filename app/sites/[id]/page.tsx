@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import { currentUser, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
-import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, runningJobs, siteReports, updateFailures } from "@/lib/hub";
+import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, notConnected, runningJobs, siteReports, updateFailures } from "@/lib/hub";
 
 export default function SitePage({ params, searchParams }: PageProps<"/sites/[id]">) {
   return (
@@ -122,6 +122,19 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
           </ul>
         )}
       </section>
+
+      {notConnected(reports.find((r) => r.type === "status")) && !status && (
+        <section className="mb-6 rounded-2xl border border-amber-300 bg-amber-50 p-5 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <h2 className="text-[15px] font-semibold">Connect this site</h2>
+          <ol className="mt-2 list-decimal space-y-1 pl-5">
+            <li>Install and activate the <a href={`/wp-control-hub.zip?v=${PLUGIN_VERSION}`} download="wp-control-hub.zip" className="font-medium underline">Control Hub plugin</a> on the site.</li>
+            <li>In WordPress, open <span className="font-medium">Settings → Control Hub</span> and paste this key (treat it like a password):</li>
+          </ol>
+          <textarea readOnly aria-label="Connection key" value={connectionKey(`https://${h.get("host")}`, site)}
+            className="mt-2 h-20 w-full rounded-lg border border-amber-300 bg-white p-2 font-mono text-xs text-zinc-900 dark:border-amber-500/30 dark:bg-zinc-950 dark:text-zinc-100" />
+          <p className="mt-2">3. Click <span className="font-medium">Check for updates</span> above. The site connects within a minute.</p>
+        </section>
+      )}
 
       {running.length > 0 && (
         <div role="status" className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">

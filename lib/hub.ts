@@ -116,12 +116,38 @@ export async function sendCommand(env: Env, site: Site, cmd: string, args: Recor
       headers: { "content-type": "application/json", "x-wpch-ts": ts, "x-wpch-sig": await sign(site.secret, ts, body) },
       body,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text()).replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 200)}`);
+    if (!res.ok) {
+      await insertReport(env, site.id, cmd, false, { error: describeFailure(res.status, await res.text()) });
+      return false;
+    }
     return true;
   } catch (e) {
-    await insertReport(env, site.id, cmd, false, { error: `Site unreachable: ${e}` });
+    await insertReport(env, site.id, cmd, false, { error: `Site unreachable: ${e instanceof Error ? e.message : e}` });
     return false;
   }
+}
+
+// plugin installed but its connection key never pasted (or no check has reached it yet); latest status report of any outcome
+export const notConnected = (latestStatus?: Report) =>
+  !latestStatus || (!latestStatus.ok && /plugin not connected/i.test(JSON.parse(latestStatus.data).error ?? ""));
+
+const HINTS: Record<number, string> = {
+  401: "a firewall or security plugin blocked the hub",
+  403: "a firewall or security plugin blocked the hub",
+  404: "the Control Hub plugin isn't installed or active on this site",
+  429: "the site's host is rate-limiting requests",
+  503: "the site shows a maintenance, coming-soon or “closed” page, or is overloaded",
+};
+
+// Readable reason for a non-2xx answer: the connector's own JSON message if there is one, else a hint plus the page's visible text.
+export function describeFailure(status: number, body: string) {
+  try {
+    const msg = JSON.parse(body)?.message;
+    if (typeof msg === "string" && msg) return msg;
+  } catch {}
+  const text = body.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const hint = HINTS[status] ?? (status >= 500 ? "the site's server had an error" : "the site refused the request");
+  return `HTTP ${status}: ${hint}${text ? ` (page says: “${text.slice(0, 120)}${text.length > 120 ? "…" : ""}”)` : ""}.`;
 }
 
 /* Backups live in one Google Drive folder. The hub holds the OAuth refresh token; sites only ever get a

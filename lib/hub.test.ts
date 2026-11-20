@@ -186,3 +186,13 @@ test("running jobs: done when the matching result arrives, update runs end early
   assert.deepEqual(names([...base, r1, rep("backup", { error: "x" }, 0)]), [scan.id], "failed backup ends it");
   assert.deepEqual(names([...base, r1, rep("update", {}), rep("scan", { error: "x" }, 0)]), [], "a failed result ends a job too");
 });
+
+test("site failures read as plain sentences", async () => {
+  const { describeFailure } = await import("./hub.ts");
+  assert.equal(describeFailure(401, JSON.stringify({ code: "wpch_denied", message: "Plugin not connected: paste the connection key." })), "Plugin not connected: paste the connection key.");
+  const closed = describeFailure(503, '<html><head><style>img{max-width:100%}body{margin:0}</style></head><body><img src="gesloten.jpg" alt="x"></body></html>');
+  assert.match(closed, /^HTTP 503: the site shows a maintenance/);
+  assert.ok(!closed.includes("max-width") && !closed.includes("page says"), closed);
+  assert.match(describeFailure(403, "<h1>Access denied</h1><p>Wordfence</p>"), /firewall.*page says: “Access denied Wordfence”/);
+  assert.match(describeFailure(502, ""), /^HTTP 502: the site's server had an error\.$/);
+});

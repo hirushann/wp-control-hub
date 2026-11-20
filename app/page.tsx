@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import { addSite, currentUser, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
 import { ago, Badge, Card, host, Icon, inputClass, Kpi, Running, Shell, Skeleton, type Tone } from "./ui";
-import { adminIssues, canSee, isRestricted, recentReports, runningJobs, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
+import { adminIssues, canSee, isRestricted, notConnected, recentReports, runningJobs, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -104,7 +104,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
     const fails = updateFailures(lastUpdate ? [lastUpdate] : []);
     const failedUpdates = (st?.updates ?? []).filter((u: { id?: string }) => u.id && fails.has(u.id)).length;
     const attention = siteAttention({ info: st?.info, findings, pending, adminWarnings: issues.length, lastBackupAt, failedJobs, failedUpdates, now });
-    return { s, st, scan, status, findings, pending, failedUpdates, running: runningBy.get(s.id) ?? [], lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined, org: s.org_id ? orgNames.get(s.org_id) : undefined };
+    return { s, st, scan, status, findings, pending, failedUpdates, unconnected: notConnected(status), running: runningBy.get(s.id) ?? [], lastBackupAt, attention, connector: connectorVersion(status), name: st?.info?.name as string | undefined, org: s.org_id ? orgNames.get(s.org_id) : undefined };
   });
   // connector updates apply to every site, whatever the filter
   const outdated = allRows.filter((x) => !!x.connector && x.connector !== PLUGIN_VERSION).length;
@@ -126,6 +126,11 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
     {rows.some((x) => x.running.length) && <meta httpEquiv="refresh" content="10" />}
     {toolbar}
     <div className="space-y-6">
+      {count((x) => x.unconnected) > 0 && (
+        <p className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <span className="font-semibold">{count((x) => x.unconnected)} site{count((x) => x.unconnected) > 1 ? "s aren’t" : " isn’t"} connected yet.</span> Open each one marked “Not connected” and paste its connection key into WordPress → Settings → Control Hub.
+        </p>
+      )}
       {(outdated > 0 || manual > 0) && (
         <div className="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-950 sm:flex-row sm:items-center sm:justify-between dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">
           <p>
@@ -169,6 +174,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
                 <td className="px-5 py-3.5">
                   <SiteName x={x} />
                   {x.running.length > 0 && <div className="mt-2"><RunningJobs jobs={x.running} /></div>}
+                  {x.unconnected && <div className="mt-2"><Badge tone="bad">Not connected</Badge></div>}
                 </td>
                 {showOrg && <td className="px-5 py-3.5 text-zinc-600 dark:text-zinc-400">{x.org ?? <Muted>–</Muted>}</td>}
                 <td className="px-5 py-3.5"><HealthBadge tone={x.attention.tone} items={x.attention.items} /></td>
@@ -192,6 +198,7 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
                 {showOrg && x.org && <Badge tone="muted">{x.org}</Badge>}
                 <HealthBadge tone={x.attention.tone} items={x.attention.items} />
                 <RunningJobs jobs={x.running} />
+                {x.unconnected && <Badge tone="bad">Not connected</Badge>}
                 {x.findings > 0 && <Badge tone="bad">{x.findings} finding{x.findings > 1 ? "s" : ""}</Badge>}
                 {x.pending > 0 && <Badge tone="warn">{x.pending} pending</Badge>}
                 {x.failedUpdates > 0 && <Badge tone="bad">{x.failedUpdates} update{x.failedUpdates > 1 ? "s" : ""} failed</Badge>}
