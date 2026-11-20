@@ -3,7 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { currentUser, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
+import { currentUser, deleteSite, manageUser, restoreBackup, runCommand, saveAllowedAdmins, setSiteOrg, toggleSetting } from "@/app/actions";
 import { BackupDialog, SubmitButton, Switch } from "@/app/buttons";
 import { ago, Badge, bytes, Card, fmtDate, host, Icon, inputClass, Kpi, Shell, Skeleton } from "@/app/ui";
 import { adminIssues, canSee, isRestricted, connectionKey, type Env, getOrgs, getSite, PLUGIN_VERSION, type Setting, SETTINGS, siteAttention, siteBackups, notConnected, runningJobs, siteReports, updateFailures } from "@/lib/hub";
@@ -133,6 +133,7 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
           <textarea readOnly aria-label="Connection key" value={connectionKey(`https://${h.get("host")}`, site)}
             className="mt-2 h-20 w-full rounded-lg border border-amber-300 bg-white p-2 font-mono text-xs text-zinc-900 dark:border-amber-500/30 dark:bg-zinc-950 dark:text-zinc-100" />
           <p className="mt-2">3. Click <span className="font-medium">Check for updates</span> above. The site connects within a minute.</p>
+          <p className="mt-2 text-xs opacity-80">No pasting: with connector 0.6.0+ installed, a super admin can open pairing on the dashboard and the site connects itself within 15 minutes.</p>
         </section>
       )}
 
@@ -396,6 +397,14 @@ async function SiteDetail({ params, searchParams }: { params: Promise<{ id: stri
               <textarea readOnly aria-label="Connection key" value={connectionKey(`https://${h.get("host")}`, site)}
                 className="mt-2 h-24 w-full rounded-lg border border-zinc-300 bg-zinc-50 p-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-950" />
             </details>
+          </Card>
+
+          <Card title="Remove site">
+            <p className={muted}>Removes it from this hub with its history. Its Google Drive backups and the WordPress plugin are left alone; deactivate the plugin on the site yourself.</p>
+            <form action={deleteSite} className="mt-3">
+              <input type="hidden" name="id" value={site.id} />
+              <SubmitButton variant="danger" confirm={`Remove ${host(site.url)} from the hub? Its activity history here is deleted and can’t be restored.`}>Remove from hub</SubmitButton>
+            </form>
           </Card>
         </div>
       </div>

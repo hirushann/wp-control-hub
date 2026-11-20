@@ -3,7 +3,7 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { refresh } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { backup, JOBS, queue, type BackupScope, canSee, isRestricted, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
+import { backup, JOBS, PAIRING_HOURS, putSetting, queue, siteKey, type BackupScope, canSee, isRestricted, connectorVersion, authenticate, createSession, type Env, getSite, getSites, hashPassword, latestReports, PLUGIN_VERSION, ROOT_USERNAME, sessionUser, restore, SESSION_COOKIE, SESSION_TTL, type Setting, SETTINGS, siteSetting, updateConnector, userCommand } from "@/lib/hub";
 
 const env = () => getCloudflareContext().env as Env;
 
@@ -129,22 +129,58 @@ async function orgFrom(form: FormData) {
   return id;
 }
 
+// one address ("url") or a pasted list ("urls": one per line, commas or spaces work too)
 export async function addSite(form: FormData) {
   const me = await currentUser();
-  const url = new URL(String(form.get("url"))); // throws on garbage
-  if (url.protocol !== "https:") throw new Error("Site URL must be https");
+  const many = form.has("urls");
+  const entries = String(form.get(many ? "urls" : "url") ?? "").split(/[\s,]+/).filter(Boolean).slice(0, 200);
+  const urls: string[] = [];
+  let skipped = 0;
+  for (const e of entries) {
+    try {
+      const url = new URL(/^https?:\/\//i.test(e) ? e : `https://${e}`);
+      if (url.protocol !== "https:") throw new Error();
+      urls.push(url.origin + url.pathname.replace(/\/+$/, ""));
+    } catch {
+      if (!many) throw new Error("Site URL must be a valid https address");
+      skipped++;
+    }
+  }
   let org = await orgFrom(form);
   // a restricted manager's sites always land in one of their own organizations
   if (isRestricted(me) && !me!.orgs.includes(org!)) {
     if (me!.orgs.length > 1) throw new Error("Pick one of your organizations");
     org = me!.orgs[0];
   }
-  const id = crypto.randomUUID();
-  const secret = [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join("");
-  await env().DB.prepare("INSERT INTO sites (id, url, secret, created_at, org_id) VALUES (?, ?, ?, ?, ?)")
-    .bind(id, url.origin + url.pathname.replace(/\/+$/, ""), secret, Date.now(), org)
-    .run();
-  redirect(`/sites/${id}`);
+  // already in the hub (www./trailing-slash variants included) or repeated in the list: skip
+  const known = new Set((await getSites(env())).map((s) => siteKey(s.url)));
+  const fresh: string[] = [];
+  for (const u of urls) if (!known.has(siteKey(u))) { known.add(siteKey(u)); fresh.push(u); }
+  skipped += urls.length - fresh.length;
+  const ids = fresh.map(() => crypto.randomUUID());
+  if (fresh.length) {
+    await env().DB.batch(fresh.map((u, i) => env().DB.prepare("INSERT INTO sites (id, url, secret, created_at, org_id) VALUES (?, ?, ?, ?, ?)")
+      .bind(ids[i], u, [...crypto.getRandomValues(new Uint8Array(32))].map((b) => b.toString(16).padStart(2, "0")).join(""), Date.now(), org)));
+  }
+  if (!many && ids.length) redirect(`/sites/${ids[0]}`);
+  redirect(`/?added=${fresh.length}&skipped=${skipped}`);
+}
+
+// forgets the site and its history here; its Google Drive backups and the WordPress plugin stay where they are
+export async function deleteSite(form: FormData) {
+  const site = await siteFrom(form);
+  await env().DB.batch([
+    env().DB.prepare("DELETE FROM reports WHERE site_id = ?").bind(site.id),
+    env().DB.prepare("DELETE FROM settings WHERE k = ?").bind(`pair:${site.id}`),
+    env().DB.prepare("DELETE FROM sites WHERE id = ?").bind(site.id),
+  ]);
+  redirect("/?removed=1");
+}
+
+export async function setPairing(form: FormData) {
+  await requireSuper();
+  await putSetting(env(), "pairing_until", String(form.get("open") === "1" ? Date.now() + PAIRING_HOURS * 3_600_000 : 0));
+  refresh();
 }
 
 export async function setSiteOrg(form: FormData) {

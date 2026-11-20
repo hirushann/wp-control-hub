@@ -37,3 +37,8 @@ CREATE TABLE IF NOT EXISTS orgs (
   created_at INTEGER NOT NULL
 );
 -- existing databases created before organizations: ALTER TABLE sites ADD COLUMN org_id TEXT; then run the user_orgs CREATE above.
+-- hub-wide settings, e.g. pairing_until (ms timestamp: unconnected sites may fetch their key until then)
+CREATE TABLE IF NOT EXISTS settings (
+  k TEXT PRIMARY KEY,
+  v TEXT NOT NULL
+);

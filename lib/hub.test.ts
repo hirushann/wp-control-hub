@@ -196,3 +196,12 @@ test("site failures read as plain sentences", async () => {
   assert.match(describeFailure(403, "<h1>Access denied</h1><p>Wordfence</p>"), /firewall.*page says: “Access denied Wordfence”/);
   assert.match(describeFailure(502, ""), /^HTTP 502: the site's server had an error\.$/);
 });
+
+test("site addresses match across scheme, www. and trailing slash", async () => {
+  const { siteKey } = await import("./hub.ts");
+  assert.equal(siteKey("https://www.Example.nl/"), "example.nl");
+  assert.equal(siteKey("example.nl"), "example.nl");
+  assert.equal(siteKey("http://example.nl/shop/"), "example.nl/shop");
+  assert.notEqual(siteKey("https://example.nl"), siteKey("https://example.nl.evil.com"));
+  assert.equal(siteKey("not a url"), "");
+});

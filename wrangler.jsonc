@@ -16,6 +16,7 @@
   "triggers": { "crons": ["0 2 * * *"] },
   "vars": {
     "MAX_ADMINS": "3",
+    "HUB_URL": "https://wp-control-hub.dayz-solutions-account.workers.dev",
     // Drive folder id: the part after /folders/ in the folder URL
     "GDRIVE_FOLDER_ID": "1_IOYcx4Id-tmsu08hjweRjiQYu2vktXl"
   }

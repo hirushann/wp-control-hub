@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
-    "plugin:zip": "rm -f public/wp-control-hub.zip && cd wp-plugin && zip -qr ../public/wp-control-hub.zip wp-control-hub -x '*.DS_Store'",
+    "plugin:zip": "sh scripts/plugin-zip.sh",
     "deploy": "npm run plugin:zip && opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "db:init": "wrangler d1 execute wp-control-hub --remote --file=schema.sql",
     "db:init:local": "wrangler d1 execute wp-control-hub --local --file=schema.sql",

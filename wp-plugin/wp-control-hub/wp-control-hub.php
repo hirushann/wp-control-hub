@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.5.3
+ * Version: 0.6.0
  * Requires PHP: 7.4
  */
 
@@ -37,11 +37,19 @@ add_action('admin_menu', function () {
 	add_options_page('Control Hub', 'Control Hub', 'manage_options', 'wpch', 'wpch_settings_page');
 });
 
+// connection key = base64 JSON {hub, id, secret} from the hub; returns the saved connection or null
+function wpch_save_key($key) {
+	$c = json_decode(base64_decode(trim((string) $key)), true);
+	if (!is_array($c) || empty($c['id']) || empty($c['secret']) || empty($c['hub']) || !wp_http_validate_url($c['hub'])) return null;
+	$c = ['hub' => esc_url_raw($c['hub']), 'id' => sanitize_text_field($c['id']), 'secret' => sanitize_text_field($c['secret'])];
+	update_option(WPCH_OPT, $c, false);
+	delete_option('wpch_pair_nonce');
+	return $c;
+}
+
 function wpch_settings_page() {
 	if (isset($_POST['wpch_key']) && check_admin_referer('wpch_save') && current_user_can('manage_options')) {
-		$c = json_decode(base64_decode(trim(wp_unslash($_POST['wpch_key']))), true);
-		if (is_array($c) && !empty($c['id']) && !empty($c['secret']) && !empty($c['hub']) && wp_http_validate_url($c['hub'])) {
-			update_option(WPCH_OPT, ['hub' => esc_url_raw($c['hub']), 'id' => sanitize_text_field($c['id']), 'secret' => sanitize_text_field($c['secret'])], false);
+		if (wpch_save_key(wp_unslash($_POST['wpch_key']))) {
 			echo '<div class="notice notice-success"><p>Connected.</p></div>';
 		} else {
 			echo '<div class="notice notice-error"><p>Invalid connection key.</p></div>';
@@ -51,7 +59,7 @@ function wpch_settings_page() {
 	?>
 	<div class="wrap">
 		<h1>Control Hub</h1>
-		<p>Status: <?php echo $c ? 'Connected to ' . esc_html($c['hub']) : 'Not connected'; ?></p>
+		<p>Status: <?php echo $c ? 'Connected to ' . esc_html($c['hub']) : (defined('WPCH_HUB') ? 'Not connected yet. This site asks ' . esc_html(WPCH_HUB) . ' for its key every 15 minutes; it connects once a super admin opens pairing there. Or paste the key below.' : 'Not connected'); ?></p>
 		<p>Login URL: <?php echo wpch_login_slug_on() ? '<a href="' . esc_url(wpch_login_url()) . '"><code>' . esc_html(wpch_login_url()) . '</code></a> (bookmark it: /wp-login.php and /wp-admin now return 404 when logged out)' : 'default (/wp-login.php)'; ?></p>
 		<form method="post">
 			<?php wp_nonce_field('wpch_save'); ?>
@@ -61,6 +69,53 @@ function wpch_settings_page() {
 		</form>
 	</div>
 	<?php
+}
+
+/* ---------- Self-pairing: no key to paste ----------
+   While not connected, the site asks the hub (WPCH_HUB, written into hub.php when the hub builds the zip) for its key and
+   sends a one-time code. The hub only answers for sites it already lists, and POSTs the key to that site's own address
+   with the code. Only this site stored the code, so a key can't be planted by anyone else, and nobody but this site gets it. */
+
+if (is_readable(__DIR__ . '/hub.php')) require_once __DIR__ . '/hub.php';
+
+add_filter('cron_schedules', function ($s) {
+	$s['wpch_15min'] = ['interval' => 15 * MINUTE_IN_SECONDS, 'display' => 'Every 15 minutes'];
+	return $s;
+});
+register_activation_hook(__FILE__, 'wpch_pair_request');
+add_action('wpch_pair', 'wpch_pair_request');
+add_action('init', function () {
+	$want = defined('WPCH_HUB') && !wpch_conn();
+	$next = wp_next_scheduled('wpch_pair');
+	if ($want && !$next) wp_schedule_event(time() + MINUTE_IN_SECONDS, 'wpch_15min', 'wpch_pair');
+	if (!$want && $next) wp_clear_scheduled_hook('wpch_pair');
+});
+
+function wpch_pair_request() {
+	if (!defined('WPCH_HUB') || wpch_conn()) return;
+	$nonce = bin2hex(random_bytes(16));
+	update_option('wpch_pair_nonce', ['nonce' => $nonce, 'at' => time()], false);
+	// fire and forget: the hub answers right away and delivers the key in its own request
+	wp_remote_post(rtrim(WPCH_HUB, '/') . '/api/pair', [
+		'blocking' => false,
+		'timeout'  => 5,
+		'headers'  => ['content-type' => 'application/json'],
+		'body'     => wp_json_encode(['url' => home_url('/'), 'nonce' => $nonce]),
+	]);
+}
+
+function wpch_pair_receive(WP_REST_Request $r) {
+	if (wpch_conn()) return new WP_Error('wpch_pair', 'Already connected.', ['status' => 409]);
+	$p = get_option('wpch_pair_nonce');
+	if (!is_array($p) || time() - (int) $p['at'] > HOUR_IN_SECONDS || !hash_equals((string) $p['nonce'], (string) $r->get_param('nonce'))) {
+		return new WP_Error('wpch_pair', 'Unknown or expired pairing code.', ['status' => 403]);
+	}
+	// only accept a key for the hub this plugin was built for
+	$c = json_decode(base64_decode((string) $r->get_param('key')), true);
+	if (!defined('WPCH_HUB') || !is_array($c) || untrailingslashit((string) ($c['hub'] ?? '')) !== untrailingslashit(WPCH_HUB) || !wpch_save_key($r->get_param('key'))) {
+		return new WP_Error('wpch_pair', 'Invalid connection key.', ['status' => 400]);
+	}
+	return ['ok' => true];
 }
 
 /* ---------- Custom login URL: /ynlog instead of /wp-login.php and /wp-admin ----------
@@ -134,6 +189,11 @@ if (wpch_login_slug_on()) {
 /* ---------- Hub → site: signed command, queued as a background job ---------- */
 
 add_action('rest_api_init', function () {
+	register_rest_route('wpch/v1', '/pair', [
+		'methods'             => 'POST',
+		'permission_callback' => '__return_true', // proven by the one-time code, see wpch_pair_receive()
+		'callback'            => 'wpch_pair_receive',
+	]);
 	register_rest_route('wpch/v1', '/command', [
 		'methods'             => 'POST',
 		'permission_callback' => 'wpch_verify_request',

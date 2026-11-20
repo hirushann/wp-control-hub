@@ -51,6 +51,14 @@ Sign in as `admin` with the `ADMIN_PASSWORD` secret (built-in super admin, alway
 *Manager* runs everything on the WordPress sites; *Super admin* can also add/remove hub users and set their passwords.
 Everyone can change their own password by clicking their name in the header. Passwords are stored as salted PBKDF2 hashes in D1. Changing `ADMIN_PASSWORD` signs everyone out; removing a user signs them out immediately.
 
+## Connecting sites
+
+Each site's page shows its connection key to paste into WordPress → Settings → Control Hub. Or skip pasting: the plugin zip
+(header button, built by `npm run plugin:zip` with `HUB_URL` from `wrangler.jsonc`) knows the hub's address, so a site running
+connector 0.6.0+ asks for its key every 15 minutes. A super admin opens **pairing** on the dashboard (24 h); the hub only answers
+for sites already added and never connected, and delivers the key to the site's own address with the one-time code the site
+sent, so only the real site can take it. Add many sites at once with "Add several sites at once"; remove one at the bottom of its page.
+
 ## Organizations
 
 Super admins group sites under organizations (e.g. one per company) on the **Organizations** page. The dashboard filters by organization,

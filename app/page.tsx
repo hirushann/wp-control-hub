@@ -2,10 +2,10 @@ import { getCloudflareContext } from "@opennextjs/cloudflare";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { addSite, currentUser, updateAllConnectors } from "./actions";
+import { addSite, currentUser, setPairing, updateAllConnectors } from "./actions";
 import { SubmitButton } from "./buttons";
-import { ago, Badge, Card, host, Icon, inputClass, Kpi, Running, Shell, Skeleton, type Tone } from "./ui";
-import { adminIssues, canSee, isRestricted, notConnected, recentReports, runningJobs, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
+import { ago, Badge, Card, fmtDate, host, Icon, inputClass, Kpi, Running, Shell, Skeleton, type Tone } from "./ui";
+import { adminIssues, canSee, isRestricted, notConnected, recentReports, runningJobs, updateFailures, connectorVersion, type Env, getOrgs, getSites, lastBackups, latestReports, pairingUntil, PLUGIN_VERSION, siteAttention } from "@/lib/hub";
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -26,7 +26,7 @@ const toneLabel = { ok: "Healthy", warn: "Review", bad: "Action needed" } as con
 async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchParams"] }) {
   await connection();
   const env = getCloudflareContext().env as Env;
-  const [allSites, latest, backups, allOrgs, sp, me] = await Promise.all([getSites(env), latestReports(env), lastBackups(env), getOrgs(env), searchParams, currentUser()]);
+  const [allSites, latest, backups, allOrgs, sp, me, pairUntil] = await Promise.all([getSites(env), latestReports(env), lastBackups(env), getOrgs(env), searchParams, currentUser(), pairingUntil(env)]);
   // restricted managers only ever get their own organizations' sites and tabs
   const sites = allSites.filter((s) => canSee(me, s));
   const restricted = isRestricted(me);
@@ -37,8 +37,21 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
   const orgNames = new Map(allOrgs.map((o) => [o.id, o.name]));
   const unassigned = sites.filter((s) => !s.org_id).length;
 
+  const orgPick = (id: string) => tabs && (
+    <>
+      <label className="sr-only" htmlFor={id}>Organization</label>
+      <select id={id} name="org_id" defaultValue={orgFilter === "none" ? "" : orgFilter} className={`${inputClass} sm:w-48`}>
+        {!restricted && <option value="">No organization</option>}
+        {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+      </select>
+    </>
+  );
+  const notice = typeof sp.added === "string" ? `Added ${sp.added} site${sp.added === "1" ? "" : "s"}${Number(sp.skipped) ? `, skipped ${sp.skipped} (already in the hub or not a valid address)` : ""}.`
+    : sp.removed ? "Site removed from the hub." : null;
+
   const toolbar = (
-    <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+    <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:flex-wrap xl:items-center xl:justify-between">
+      {notice && <p role="status" className="basis-full rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p>}
       {tabs ? (
         <nav aria-label="Filter by organization" className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1">
           {[["", "All sites", sites.length], ...orgs.map((o) => [o.id, o.name, o.sites]), ...(unassigned && unassigned < sites.length ? [["none", "No organization", unassigned]] : [])].map(([id, label, n]) => (
@@ -52,22 +65,23 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
       <form action={addSite} className="flex w-full flex-col gap-2 sm:flex-row xl:w-auto">
         <label className="sr-only" htmlFor="url">Site URL</label>
         <input id="url" name="url" type="url" required placeholder="https://client-site.com" className={`${inputClass} xl:w-72`} />
-        {tabs && (
-          <>
-            <label className="sr-only" htmlFor="org_id">Organization</label>
-            <select id="org_id" name="org_id" defaultValue={orgFilter === "none" ? "" : orgFilter} className={`${inputClass} sm:w-48`}>
-              {!restricted && <option value="">No organization</option>}
-              {orgs.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </select>
-          </>
-        )}
+        {orgPick("org_id")}
         <SubmitButton variant="primary">Add site</SubmitButton>
       </form>
+      <details className="basis-full text-sm">
+        <summary className="cursor-pointer font-medium text-zinc-600 dark:text-zinc-400">Add several sites at once</summary>
+        <form action={addSite} className="mt-3 space-y-2">
+          <label htmlFor="urls" className="block text-zinc-500">One address per line. Sites already in the hub are skipped.</label>
+          <textarea id="urls" name="urls" required rows={6} placeholder={"client-one.com\nhttps://www.client-two.nl"} className={`${inputClass} h-auto py-2 font-mono`} />
+          <div className="flex flex-col gap-2 sm:flex-row">{orgPick("urls_org")}<SubmitButton variant="primary">Add sites</SubmitButton></div>
+        </form>
+      </details>
     </div>
   );
   const max = Number(env.MAX_ADMINS);
   // eslint-disable-next-line react-hooks/purity -- server component, rendered per request
   const now = Date.now();
+  const pairingOpen = pairUntil > now;
   const runningBy = Map.groupBy(runningJobs(await recentReports(env, now), now), (j) => j.site_id);
 
   if (!sites.length) {
@@ -126,10 +140,21 @@ async function Sites({ searchParams }: { searchParams: PageProps<"/">["searchPar
     {rows.some((x) => x.running.length) && <meta httpEquiv="refresh" content="10" />}
     {toolbar}
     <div className="space-y-6">
-      {count((x) => x.unconnected) > 0 && (
-        <p className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-950 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
-          <span className="font-semibold">{count((x) => x.unconnected)} site{count((x) => x.unconnected) > 1 ? "s aren’t" : " isn’t"} connected yet.</span> Open each one marked “Not connected” and paste its connection key into WordPress → Settings → Control Hub.
-        </p>
+      {(count((x) => x.unconnected) > 0 || pairingOpen) && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-5 py-4 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100">
+          <p>
+            {count((x) => x.unconnected) > 0 && <span className="font-semibold">{count((x) => x.unconnected)} site{count((x) => x.unconnected) > 1 ? "s aren’t" : " isn’t"} connected yet. </span>}
+            {pairingOpen
+              ? <>Pairing is open until {fmtDate(pairUntil)}: sites running connector 0.6.0+ connect themselves within 15 minutes.</>
+              : <>Install connector 0.6.0+ on them and open pairing, or paste each site’s key into WordPress → Settings → Control Hub.</>}
+          </p>
+          {me?.role === "super" && (
+            <form action={setPairing} className="shrink-0">
+              <input type="hidden" name="open" value={pairingOpen ? "0" : "1"} />
+              <SubmitButton variant={pairingOpen ? "secondary" : "primary"}>{pairingOpen ? "Close pairing" : "Open pairing for 24h"}</SubmitButton>
+            </form>
+          )}
+        </div>
       )}
       {(outdated > 0 || manual > 0) && (
         <div className="flex flex-col gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-5 py-4 text-sm text-indigo-950 sm:flex-row sm:items-center sm:justify-between dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-100">

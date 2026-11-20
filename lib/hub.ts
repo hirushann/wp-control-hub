@@ -6,7 +6,7 @@ export type Report = { id: number; site_id: string; type: string; ok: number; da
 
 export const REPORT_TYPES = ["status", "scan", "backup", "update", "restore", "connector", "user", "settings"];
 // connector plugin version this hub serves at /wp-control-hub.zip; must match the plugin header (checked in hub.test.ts)
-export const PLUGIN_VERSION = "0.5.3";
+export const PLUGIN_VERSION = "0.6.0";
 export type BackupScope = "both" | "db" | "files";
 const enc = new TextEncoder();
 
@@ -125,6 +125,59 @@ export async function sendCommand(env: Env, site: Site, cmd: string, args: Recor
     await insertReport(env, site.id, cmd, false, { error: `Site unreachable: ${e instanceof Error ? e.message : e}` });
     return false;
   }
+}
+
+/* ---------- Pairing: sites fetch their own key while a super admin has pairing open ----------
+   The site says "I'm <url>, here's a one-time code". The hub only answers for sites already added and never connected,
+   and sends the key to the address it has on file (never back to the caller), along with that code. Only the real site
+   stored the code, so only the real site can accept the key. */
+export const PAIRING_HOURS = 24;
+
+export async function getSetting(env: Env, k: string) {
+  return env.DB.prepare("SELECT v FROM settings WHERE k = ?").bind(k).first<string>("v");
+}
+export async function putSetting(env: Env, k: string, v: string) {
+  await env.DB.prepare("INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").bind(k, v).run();
+}
+export const pairingUntil = async (env: Env) => Number((await getSetting(env, "pairing_until")) ?? 0);
+
+// the same site whatever the scheme, "www." or trailing slash
+export function siteKey(url: string) {
+  try {
+    const u = new URL(/^https?:\/\//i.test(url) ? url : `https://${url}`);
+    return u.hostname.toLowerCase().replace(/^www\./, "") + u.pathname.replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+const everConnected = async (env: Env, siteId: string) =>
+  !!(await env.DB.prepare("SELECT 1 FROM reports WHERE site_id = ? AND type = 'status' AND ok = 1 LIMIT 1").bind(siteId).first());
+
+// checks a pairing request; same answer for unknown and already-connected sites so callers can't probe the site list
+export async function findPairable(env: Env, url: string, now = Date.now()): Promise<{ site: Site } | { status: number; message: string }> {
+  if ((await pairingUntil(env)) < now) return { status: 403, message: "Pairing is closed. A super admin can open it on the hub's dashboard." };
+  const key = siteKey(url);
+  const site = key ? (await getSites(env)).find((s) => siteKey(s.url) === key) : undefined;
+  if (!site || (await everConnected(env, site.id))) return { status: 404, message: "No unconnected site with this address in the hub. Add it there first." };
+  // one key delivery per site per minute, so the endpoint can't be used to hammer a site
+  const last = Number((await getSetting(env, `pair:${site.id}`)) ?? 0);
+  if (now - last < 60_000) return { status: 429, message: "Pairing already in progress; try again in a minute." };
+  await putSetting(env, `pair:${site.id}`, String(now));
+  return { site };
+}
+
+export async function deliverKey(env: Env, hub: string, site: Site, nonce: string) {
+  const body = JSON.stringify({ nonce, key: connectionKey(hub, site) });
+  try {
+    const res = await fetch(`${site.url.replace(/\/+$/, "")}/?rest_route=/wpch/v1/pair`, { method: "POST", headers: { "content-type": "application/json" }, body });
+    if (!res.ok) throw new Error(describeFailure(res.status, await res.text()));
+  } catch (e) {
+    // wording keeps the site flagged "Not connected"
+    await insertReport(env, site.id, "status", false, { error: `Plugin not connected: automatic pairing failed. ${e instanceof Error ? e.message : e}` });
+    return;
+  }
+  await queue(env, site, "status", undefined, JOBS.status);
 }
 
 // plugin installed but its connection key never pasted (or no check has reached it yet); latest status report of any outcome
