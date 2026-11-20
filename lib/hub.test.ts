@@ -224,7 +224,10 @@ test("connector pairing: back-to-back requests share a code; only the right code
     class WP_Error { public $data; function __construct($c, $m, $d) { $this->data = $d; } }
     class WP_REST_Request { function __construct(public $p) {} function get_param($k) { return $this->p[$k] ?? null; } }
     $src = file_get_contents($argv[1]);
-    foreach (['wpch_conn', 'wpch_save_key', 'wpch_pair_request', 'wpch_pair_receive'] as $fn) { preg_match('/^function ' . $fn . '\\(.*?^}$/sm', $src, $m); eval($m[0]); }
+    function maybe_unserialize($v) { return $v; }
+    function wp_cache_delete($k, $g) {}
+    $wpdb = new class { public $options = 'wp_options'; public $db = []; function prepare($q, $a) { return $a; } function get_var($name) { return $this->db[$name] ?? null; } };
+    foreach (['wpch_conn', 'wpch_option', 'wpch_flush_option_cache', 'wpch_save_key', 'wpch_pair_request', 'wpch_pair_receive'] as $fn) { preg_match('/^function ' . $fn . '\\(.*?^}$/sm', $src, $m); eval($m[0]); }
     $key = fn($hub) => base64_encode(json_encode(['hub' => $hub, 'id' => 'a', 'secret' => 's']));
     $try = fn($n, $k) => ($r = wpch_pair_receive(new WP_REST_Request(['nonce' => $n, 'key' => $k]))) instanceof WP_Error ? $r->data['status'] : 'ok';
     wpch_pair_request(); wpch_pair_request();                       // cron and a visit, seconds apart
@@ -235,10 +238,13 @@ test("connector pairing: back-to-back requests share a code; only the right code
     $out['wrongHub'] = $try($SENT[2], $key('https://evil.example'));
     $out['right'] = $try($SENT[2], $key('https://hub.example/'));
     $out['again'] = $try($SENT[2], $key('https://hub.example'));
+    // stale object cache: the option cache says "missing" but the row is in the database
+    $saved = $GLOBALS['O']['wpch_connection']; unset($GLOBALS['O']['wpch_connection']); $wpdb->db['wpch_connection'] = $saved;
+    $out['staleCache'] = wpch_conn() === $saved;
     echo json_encode($out);`;
   const plugin = new URL("../wp-plugin/wp-control-hub/wp-control-hub.php", import.meta.url).pathname;
   assert.deepEqual(JSON.parse(execFileSync("php", ["-r", harness, plugin]).toString()),
-    { same: true, renewed: true, stale: 403, wrongHub: 400, right: "ok", again: 409 });
+    { same: true, renewed: true, stale: 403, wrongHub: 400, right: "ok", again: 409, staleCache: true });
 });
 
 test("connector lifts other plugins' REST blocks for its own routes only", () => {

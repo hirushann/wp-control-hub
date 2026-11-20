@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.7.0
+ * Version: 0.7.1
  * Requires PHP: 7.4
  */
 
@@ -22,8 +22,25 @@ const WPCH_SIGNATURES = [
 ];
 
 function wpch_conn() {
-	$c = get_option(WPCH_OPT);
+	$c = wpch_option(WPCH_OPT);
 	return is_array($c) ? $c : null;
+}
+
+// get_option, but straight from the database when the cache says "missing": a stale external object cache
+// (seen with LiteSpeed's object-cache.php) kept reporting our options as absent after they were saved.
+function wpch_option($name) {
+	global $wpdb;
+	$v = get_option($name);
+	if ($v !== false) return $v;
+	$raw = $wpdb->get_var($wpdb->prepare("SELECT option_value FROM {$wpdb->options} WHERE option_name = %s", $name));
+	return $raw === null ? false : maybe_unserialize($raw);
+}
+
+// after writing our options, so the next request doesn't read a cached "missing"
+function wpch_flush_option_cache($name) {
+	wp_cache_delete($name, 'options');
+	wp_cache_delete('notoptions', 'options');
+	wp_cache_delete('alloptions', 'options');
 }
 
 // Must match sign() in the hub's lib/hub.ts
@@ -44,6 +61,7 @@ function wpch_save_key($key) {
 	$c = ['hub' => esc_url_raw($c['hub']), 'id' => sanitize_text_field($c['id']), 'secret' => sanitize_text_field($c['secret'])];
 	update_option(WPCH_OPT, $c, false);
 	delete_option('wpch_pair_nonce');
+	wpch_flush_option_cache(WPCH_OPT);
 	return $c;
 }
 
@@ -101,12 +119,13 @@ add_action('admin_init', function () {
 function wpch_pair_request() {
 	if (!defined('WPCH_HUB') || wpch_conn()) return;
 	// reuse a fresh code: two requests seconds apart (cron + a visit) must not cancel the key already on its way
-	$p = get_option('wpch_pair_nonce');
+	$p = wpch_option('wpch_pair_nonce');
 	if (is_array($p) && time() - (int) $p['at'] < 10 * MINUTE_IN_SECONDS) {
 		$nonce = (string) $p['nonce'];
 	} else {
 		$nonce = bin2hex(random_bytes(16));
 		update_option('wpch_pair_nonce', ['nonce' => $nonce, 'at' => time()], false);
+		wpch_flush_option_cache('wpch_pair_nonce');
 	}
 	// fire and forget: the hub answers right away and delivers the key in its own request
 	wp_remote_post(rtrim(WPCH_HUB, '/') . '/api/pair', [
@@ -119,7 +138,7 @@ function wpch_pair_request() {
 
 function wpch_pair_receive(WP_REST_Request $r) {
 	if (wpch_conn()) return new WP_Error('wpch_pair', 'Already connected.', ['status' => 409]);
-	$p = get_option('wpch_pair_nonce');
+	$p = wpch_option('wpch_pair_nonce');
 	if (!is_array($p) || time() - (int) $p['at'] > HOUR_IN_SECONDS || !hash_equals((string) $p['nonce'], (string) $r->get_param('nonce'))) {
 		return new WP_Error('wpch_pair', 'Unknown or expired pairing code.', ['status' => 403]);
 	}
