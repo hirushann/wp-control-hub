@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WP Control Hub Connector
  * Description: Links this site to WP Control Hub: malware scans, admin account checks, Google Drive backups, updates with automatic rollback, remote restore.
- * Version: 0.6.2
+ * Version: 0.7.0
  * Requires PHP: 7.4
  */
 
@@ -89,6 +89,13 @@ add_action('init', function () {
 	$next = wp_next_scheduled('wpch_pair');
 	if ($want && !$next) wp_schedule_event(time() + MINUTE_IN_SECONDS, 'wpch_15min', 'wpch_pair');
 	if (!$want && $next) wp_clear_scheduled_hook('wpch_pair');
+});
+
+// cron may never run (see wpch_command), so an admin visiting wp-admin also asks, at most every 5 minutes
+add_action('admin_init', function () {
+	if (!defined('WPCH_HUB') || wpch_conn() || get_transient('wpch_pair_wait')) return;
+	set_transient('wpch_pair_wait', 1, 5 * MINUTE_IN_SECONDS);
+	wpch_pair_request();
 });
 
 function wpch_pair_request() {
@@ -237,10 +244,31 @@ function wpch_command(WP_REST_Request $r) {
 	if (!in_array($cmd, ['status', 'scan', 'backup', 'restore', 'connector', 'user', 'settings'], true)) {
 		return new WP_Error('wpch_cmd', 'Unknown command', ['status' => 400]);
 	}
+	$args = (array) ($p['args'] ?? []);
+	// Answer the hub, then do the work in this same PHP process once the response is out. WP-cron only runs on visits
+	// and is broken outright on some sites (one crashing event stops every run), which left jobs queued forever.
+	if (wpch_can_finish_request()) {
+		add_action('shutdown', function () use ($cmd, $args) {
+			wpch_finish_request();
+			wpch_run_job($cmd, $args);
+		}, PHP_INT_MAX);
+		return new WP_REST_Response(['running' => $cmd], 202);
+	}
+	// shortcut: without a way to end the response early the hub would wait for the whole job, so fall back to WP-cron
 	// uniqid: WP drops identical single events queued within 10 minutes
-	wp_schedule_single_event(time(), 'wpch_job', [$cmd, (array) ($p['args'] ?? []), uniqid()]);
+	wp_schedule_single_event(time(), 'wpch_job', [$cmd, $args, uniqid()]);
 	spawn_cron();
 	return new WP_REST_Response(['queued' => $cmd], 202);
+}
+
+// PHP-FPM and LiteSpeed (Hostinger) can send the response and keep running
+function wpch_can_finish_request() {
+	return function_exists('fastcgi_finish_request') || function_exists('litespeed_finish_request');
+}
+
+function wpch_finish_request() {
+	if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+	elseif (function_exists('litespeed_finish_request')) litespeed_finish_request();
 }
 
 /* ---------- Site → hub: signed report ---------- */

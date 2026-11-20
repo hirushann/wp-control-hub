@@ -260,3 +260,25 @@ test("connector lifts other plugins' REST blocks for its own routes only", () =>
   assert.deepEqual(JSON.parse(execFileSync("php", ["-r", harness, plugin]).toString()),
     { queryVar: "allowed", getParam: "allowed", pretty: "allowed", subdir: "allowed", other: "blocked", lookalike: "blocked", prefix: "blocked" });
 });
+
+test("connector runs hub jobs after answering, falling back to WP-cron only when it can't end the response early", () => {
+  const harness = (canFinish: boolean) => `
+    $LOG = [];
+    ${canFinish ? "function litespeed_finish_request() { $GLOBALS['LOG'][] = 'finish'; }" : ""}
+    function add_action($hook, $fn) { $GLOBALS['LOG'][] = 'add_action:' . $hook; $GLOBALS['SHUTDOWN'] = $fn; }
+    function wp_schedule_single_event($t, $hook, $args) { $GLOBALS['LOG'][] = 'cron:' . $args[0]; }
+    function spawn_cron() {}
+    function wpch_run_job($cmd, $args) { $GLOBALS['LOG'][] = 'run:' . $cmd . ':' . json_encode($args); }
+    class WP_Error { function __construct(...$a) {} }
+    class WP_REST_Response { public $data, $status; function __construct($d, $s) { $this->data = $d; $this->status = $s; } }
+    class WP_REST_Request { function __construct(public $b) {} function get_body() { return $this->b; } }
+    $src = file_get_contents($argv[1]);
+    foreach (['wpch_command', 'wpch_can_finish_request', 'wpch_finish_request'] as $fn) { preg_match('/^function ' . $fn . '\\(.*?^}$/sm', $src, $m); eval($m[0]); }
+    $res = wpch_command(new WP_REST_Request(json_encode(['cmd' => 'status', 'args' => ['x' => 1]])));
+    if (isset($SHUTDOWN)) ($SHUTDOWN)();
+    echo json_encode(['status' => $res->status, 'data' => $res->data, 'log' => $LOG]);`;
+  const plugin = new URL("../wp-plugin/wp-control-hub/wp-control-hub.php", import.meta.url).pathname;
+  const run = (c: boolean) => JSON.parse(execFileSync("php", ["-r", harness(c), plugin]).toString());
+  assert.deepEqual(run(true), { status: 202, data: { running: "status" }, log: ["add_action:shutdown", "finish", 'run:status:{"x":1}'] }, "answer first, then run in-process");
+  assert.deepEqual(run(false), { status: 202, data: { queued: "status" }, log: ["cron:status"] }, "no early finish: queue on WP-cron");
+});
